@@ -1,7 +1,12 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Search, Sparkles, MapPin, HeartHandshake, CheckCircle2, X, AlertCircle, RotateCcw, Gift, ShieldCheck, Lock, Download, RefreshCw, Calendar, UserCheck, ScanBarcode, QrCode } from 'lucide-react';
+import Tesseract from 'tesseract.js';
+import { 
+  Search, Sparkles, MapPin, HeartHandshake, CheckCircle2, X, AlertCircle, 
+  RotateCcw, Gift, ShieldCheck, Lock, Download, RefreshCw, Calendar, 
+  UserCheck, ScanBarcode, QrCode, Camera 
+} from 'lucide-react';
 
 interface Book {
   id: string;
@@ -28,6 +33,11 @@ export default function Home() {
 
   const [verificationError, setVerificationError] = useState('');
   const [isSubmittingCheckout, setIsSubmittingCheckout] = useState(false);
+
+  // Optical Character Recognition (OCR) States for PennCard
+  const [ocrProcessing, setOcrProcessing] = useState(false);
+  const [ocrError, setOcrError] = useState('');
+  const [detectedPennId, setDetectedPennId] = useState('');
 
   // RFID / Optical Scan Simulator States
   const [scannedCode, setScannedCode] = useState('');
@@ -103,6 +113,59 @@ export default function Home() {
   const extractPennKey = (emailAddress: string) => {
     if (!emailAddress.includes('@')) return '';
     return emailAddress.split('@')[0].trim().toLowerCase();
+  };
+
+  // PennCard Visual Verification & OCR Parser
+  const handlePennCardUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setOcrProcessing(true);
+    setOcrError('');
+
+    try {
+      const { data: { text } } = await Tesseract.recognize(file, 'eng');
+      const clean = text.toUpperCase();
+
+      // 1. PennCard Visual Header Validation
+      const hasPennCardHeader = clean.includes('PENNCARD');
+      const hasUniversityPenn = clean.includes('PENNSYLVANIA') || clean.includes('UNIVERSITY');
+
+      if (!hasPennCardHeader && !hasUniversityPenn) {
+        setOcrError('Image rejected: Not a valid PennCard visual. Please capture a clear image of an official University of Pennsylvania PennCard.');
+        setOcrProcessing(false);
+        return;
+      }
+
+      // 2. Extract 8-digit PennID Number
+      const pennIdMatch = text.match(/\b\d{8}\b/);
+      const pennId = pennIdMatch ? pennIdMatch[0] : '';
+      if (pennId) setDetectedPennId(pennId);
+
+      // 3. Extract Patron Name
+      const ignoreWords = ['PENNCARD', 'PENNSYLVANIA', 'UNIVERSITY', 'SAMPLE', 'UNDERGRADUATE', 'GRADUATE', 'FACULTY', 'STAFF', 'EXPIRES'];
+      const candidateLines = text
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => l.length > 2 && !ignoreWords.some(w => l.toUpperCase().includes(w)) && !/\d/.test(l));
+
+      const detectedName = candidateLines.length > 0 ? candidateLines[0] : '';
+
+      if (detectedName) {
+        const derivedKey = detectedName.toLowerCase().replace(/[^a-z]/g, '').slice(0, 8);
+        setUser(prev => ({
+          ...prev,
+          name: detectedName,
+          email: prev.email || `${derivedKey}@wharton.upenn.edu`,
+          pennKey: derivedKey,
+        }));
+      }
+    } catch (err) {
+      console.error(err);
+      setOcrError('Failed to parse card text. Ensure adequate lighting and upload a clear photo.');
+    } finally {
+      setOcrProcessing(false);
+    }
   };
 
   // Complete Catalog of 91 Books
@@ -454,7 +517,7 @@ export default function Home() {
             onClick={() => setActiveModal('verify')}
             className={`flex items-center gap-1.5 border px-3.5 py-2 text-xs tracking-wider uppercase transition-colors ${user.isVerified ? 'border-emerald-700 text-emerald-800 bg-emerald-50' : 'border-wharton-navy/20 text-wharton-navy hover:bg-wharton-navy hover:text-white'}`}
           >
-            <UserCheck className="w-4 h-4 text-wharton-red" /> {user.isVerified ? `✓ ${user.name.split(' ')[0]}` : 'Verify PennID Card'}
+            <UserCheck className="w-4 h-4 text-wharton-red" /> {user.isVerified ? `✓ ${user.name.split(' ')[0]}` : 'Verify PennCard'}
           </button>
         </div>
       </header>
@@ -665,18 +728,70 @@ export default function Home() {
         </div>
       )}
 
-      {/* MODAL 1: PennID Verification Modal */}
+      {/* MODAL 1: PennCard Optical Verification Modal */}
       {activeModal === 'verify' && (
         <div className="fixed inset-0 bg-wharton-navy/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-canvas border border-wharton-navy max-w-md w-full p-6 shadow-2xl relative">
-            <button onClick={() => setActiveModal(null)} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy"><X className="w-5 h-5" /></button>
+          <div className="bg-canvas border border-wharton-navy max-w-md w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <button 
+              onClick={() => { setActiveModal(null); setOcrError(''); }} 
+              className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            
             <div className="flex items-center gap-2 text-wharton-red text-xs uppercase tracking-widest font-semibold mb-1">
               <UserCheck className="w-4 h-4" /> Patron Identity Verification
             </div>
-            <h3 className="font-serif text-2xl text-wharton-navy mb-1">Verify PennID Card</h3>
-            <p className="text-xs text-subtle mb-4">Please enter your full name and official Penn email to borrow books from Glover Library.</p>
+            <h3 className="font-serif text-2xl text-wharton-navy mb-1">Verify PennCard</h3>
+            <p className="text-xs text-subtle mb-4">
+              Capture or upload a photo of your physical PennCard. The system validates the official layout and extracts your PennID.
+            </p>
 
-            <form onSubmit={handleVerifySubmit} className="space-y-4">
+            {/* Optical Card Scanner Dropzone */}
+            <div className="border-2 border-dashed border-wharton-navy/30 bg-white p-5 text-center mb-4 relative hover:border-wharton-navy transition-colors rounded-sm">
+              <input 
+                type="file" 
+                accept="image/*" 
+                capture="environment"
+                onChange={handlePennCardUpload}
+                disabled={ocrProcessing}
+                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+              />
+              {ocrProcessing ? (
+                <div className="flex flex-col items-center py-2">
+                  <RefreshCw className="w-8 h-8 text-wharton-red animate-spin mb-2" />
+                  <p className="text-xs font-semibold text-wharton-navy">Analyzing PennCard & reading credentials...</p>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center py-1">
+                  <Camera className="w-8 h-8 text-wharton-navy/40 mb-1" />
+                  <span className="text-xs font-semibold text-wharton-navy">Tap to Capture / Upload PennCard</span>
+                  <span className="text-[10px] text-subtle mt-0.5">Validates official blue banner & 8-digit PennID</span>
+                </div>
+              )}
+            </div>
+
+            {/* Rejection Alert */}
+            {ocrError && (
+              <div className="bg-red-50 border border-red-200 text-wharton-red p-2.5 text-xs flex items-start gap-2 mb-3">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{ocrError}</span>
+              </div>
+            )}
+
+            {/* Success Banner */}
+            {detectedPennId && (
+              <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 p-2.5 text-xs mb-3 flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-700 mt-0.5" />
+                <div>
+                  <span className="font-semibold block">PennCard Verified</span>
+                  <span>PennID: {detectedPennId} {user.name ? `• ${user.name}` : ''}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Verification Form */}
+            <form onSubmit={handleVerifySubmit} className="space-y-3">
               <div>
                 <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">Full Name *</label>
                 <input 
@@ -684,7 +799,7 @@ export default function Home() {
                   value={user.name} 
                   onChange={(e) => setUser({...user, name: e.target.value})} 
                   placeholder="e.g. Gerald Glover"
-                  className="w-full bg-white border border-wharton-navy/20 p-2.5 font-serif text-wharton-navy" 
+                  className="w-full bg-white border border-wharton-navy/20 p-2 text-xs font-serif text-wharton-navy" 
                   required
                 />
               </div>
@@ -696,24 +811,18 @@ export default function Home() {
                   value={user.email} 
                   onChange={(e) => setUser({...user, email: e.target.value})} 
                   placeholder="username@wharton.upenn.edu"
-                  className="w-full bg-white border border-wharton-navy/20 p-2.5 font-serif text-wharton-navy" 
+                  className="w-full bg-white border border-wharton-navy/20 p-2 text-xs font-serif text-wharton-navy" 
                   required
                 />
                 <span className="text-[10px] text-subtle mt-1 block">Must end with <strong>penn.edu</strong></span>
               </div>
 
-              {verificationError && (
-                <div className="bg-red-50 border border-red-200 text-wharton-red p-2.5 text-xs flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>{verificationError}</span>
-                </div>
-              )}
-
               <button 
                 type="submit"
-                className="w-full mt-2 bg-wharton-navy text-white py-3 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors font-semibold flex items-center justify-center gap-2"
+                disabled={ocrProcessing}
+                className="w-full mt-2 bg-wharton-navy text-white py-2.5 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors font-semibold flex items-center justify-center gap-2"
               >
-                <CheckCircle2 className="w-4 h-4" /> VERIFY PENNID
+                <CheckCircle2 className="w-4 h-4" /> CONFIRM & SAVE PATRON
               </button>
             </form>
           </div>
