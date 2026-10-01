@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Search, Sparkles, MapPin, HeartHandshake, CheckCircle2, X, AlertCircle, RotateCcw, Gift, ShieldCheck, Lock, Download, RefreshCw, Calendar, BookOpen, UserCheck, Send } from 'lucide-react';
+import { Search, Sparkles, MapPin, HeartHandshake, CheckCircle2, X, AlertCircle, RotateCcw, Gift, ShieldCheck, Lock, Download, RefreshCw, Calendar, BookOpen, UserCheck, Send, ScanBarcode, QrCode } from 'lucide-react';
 
 interface Book {
   id: string;
@@ -29,6 +29,10 @@ export default function Home() {
   const [verificationError, setVerificationError] = useState('');
   const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
 
+  // RFID Scanner Simulation States
+  const [scannedCode, setScannedCode] = useState('');
+  const [scannerStatus, setScannerStatus] = useState<'idle' | 'scanning' | 'success' | 'not-found'>('idle');
+
   // Admin Mode States
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
   const [adminPasscode, setAdminPasscode] = useState('');
@@ -48,7 +52,7 @@ export default function Home() {
     }
   }, []);
 
-  const [activeModal, setActiveModal] = useState<'verify' | 'pdp' | 'request-confirm' | 'return-confirm' | 'donate' | 'admin-login' | 'admin-panel' | null>(null);
+  const [activeModal, setActiveModal] = useState<'verify' | 'pdp' | 'request-confirm' | 'return-confirm' | 'scan' | 'donate' | 'admin-login' | 'admin-panel' | null>(null);
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -196,6 +200,34 @@ export default function Home() {
     { id: '91', title: "Working Backwards", author: "Colin Bryar & Bill Carr", isbn: "978-1250267597", tags: ["Operations", "Scaling", "Leadership & Culture"], shelf: "Dewey 658 - Amazon Culture", isCheckedOut: false }
   ]);
 
+  // RFID Scan Lookup Simulator
+  const handleSimulateScan = (codeToScan?: string) => {
+    const targetCode = (codeToScan || scannedCode).trim().toLowerCase();
+    if (!targetCode) return;
+
+    setScannerStatus('scanning');
+
+    setTimeout(() => {
+      const found = books.find(b => 
+        b.id === targetCode ||
+        (b.isbn && b.isbn.replace(/[^0-9]/g, '').includes(targetCode.replace(/[^0-9]/g, ''))) ||
+        b.title.toLowerCase().includes(targetCode)
+      );
+
+      if (found) {
+        setScannerStatus('success');
+        setSelectedBook(found);
+        setTimeout(() => {
+          setActiveModal(found.isCheckedOut ? 'return-confirm' : 'request-confirm');
+          setScannerStatus('idle');
+          setScannedCode('');
+        }, 600);
+      } else {
+        setScannerStatus('not-found');
+      }
+    }, 700);
+  };
+
   const handleAdminLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (adminPasscode === 'Bound2BeAGoodBook') {
@@ -236,7 +268,6 @@ export default function Home() {
     a.click();
   };
 
-  // Verification Handler
   const handleVerifySubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setVerificationError('');
@@ -276,7 +307,6 @@ export default function Home() {
     }
   };
 
-  // Trigger from "Request" button on card or PDP
   const handleInitiateRequest = (book: Book) => {
     setSelectedBook(book);
 
@@ -299,9 +329,9 @@ export default function Home() {
       dueDate: undefined 
     } : b));
     setActiveModal(null);
+    alert("Book return logged! Please return the book to its shelf position.");
   };
 
-  // Final Borrow Request Submission
   const handleConfirmBorrowRequest = async () => {
     if (!selectedBook) return;
     setIsSubmittingRequest(true);
@@ -342,7 +372,7 @@ export default function Home() {
     } finally {
       setIsSubmittingRequest(false);
       setActiveModal(null);
-      alert(`Request received! The librarian team has been notified and will coordinate delivery. Check ${user.email} shortly for details.`);
+      alert(`RFID check-out recorded! The librarian team has been notified. Confirmation sent to ${user.email}.`);
     }
   };
 
@@ -401,6 +431,12 @@ export default function Home() {
         </div>
         <div className="flex flex-wrap gap-2 md:gap-3 text-sm font-medium">
           <button 
+            onClick={() => setActiveModal('scan')}
+            className="flex items-center gap-1.5 bg-wharton-navy text-white px-3.5 py-2 text-xs tracking-wider uppercase hover:bg-wharton-red transition-colors font-semibold shadow-sm"
+          >
+            <ScanBarcode className="w-4 h-4" /> Scan RFID / ISBN
+          </button>
+          <button 
             onClick={() => setActiveModal(isAdminLoggedIn ? 'admin-panel' : 'admin-login')}
             className="flex items-center gap-1.5 border border-wharton-navy/20 text-wharton-navy px-3 py-2 text-xs tracking-wider uppercase hover:bg-wharton-navy hover:text-white transition-colors"
           >
@@ -411,16 +447,6 @@ export default function Home() {
             className="flex items-center gap-1.5 border border-wharton-navy/20 text-wharton-navy px-3.5 py-2 text-xs tracking-wider uppercase hover:bg-wharton-navy hover:text-white transition-colors"
           >
             <Gift className="w-4 h-4 text-wharton-red" /> Donate Book
-          </button>
-          <button 
-            onClick={() => {
-              const borrowed = books.find(b => b.isCheckedOut) || books[0];
-              setSelectedBook(borrowed);
-              setActiveModal('return-confirm');
-            }}
-            className="flex items-center gap-1.5 border border-wharton-navy/20 text-wharton-navy px-3.5 py-2 text-xs tracking-wider uppercase hover:bg-wharton-navy hover:text-white transition-colors"
-          >
-            <RotateCcw className="w-4 h-4 text-wharton-red" /> Return Book
           </button>
           <button 
             onClick={() => setActiveModal('verify')}
@@ -434,13 +460,13 @@ export default function Home() {
       {/* Editorial Hero */}
       <section className="px-6 py-12 md:px-16 max-w-5xl mx-auto text-center">
         <span className="inline-block border border-wharton-navy/20 px-3 py-1 text-xs uppercase tracking-widest text-wharton-navy mb-4">
-          By WEMBA, For WEMBA
+          By WEMBA, For WEMBA • Scan & Request Prototype
         </span>
         <h2 className="font-serif text-3xl md:text-5xl leading-tight text-wharton-navy mb-4">
           Where community meets access — extending learning beyond the classroom.
         </h2>
         <p className="text-sm md:text-base text-charcoal/80 max-w-2xl mx-auto mb-8 leading-relaxed">
-          Founded and curated by <strong>Gerald Glover (WG’26)</strong>, Glover Library is a self-sustaining knowledge hub designed for Executive MBA participants.
+          Founded and curated by <strong>Gerald Glover (WG’26)</strong>, Glover Library is a self-sustaining knowledge hub. Scan physical tags on the shelf at 2 Harrison St or submit a digital check-out.
         </p>
 
         {/* Smart Search Bar */}
@@ -461,8 +487,8 @@ export default function Home() {
         <div className="max-w-3xl mx-auto text-center flex flex-col md:flex-row items-center justify-center gap-4">
           <HeartHandshake className="w-8 h-8 text-wharton-red shrink-0" />
           <div>
-            <h4 className="font-serif text-xl text-white">Borrow freely. Return thoughtfully.</h4>
-            <p className="text-xs text-canvas/70 mt-1">Browse and request in one tap—we will bring the book directly to you during class.</p>
+            <h4 className="font-serif text-xl text-white">Borrow freely. Scan on shelf. Return thoughtfully.</h4>
+            <p className="text-xs text-canvas/70 mt-1">Tap 'Scan RFID / ISBN' to tap-borrow physical books, or browse below to reserve.</p>
           </div>
         </div>
       </section>
@@ -563,6 +589,80 @@ export default function Home() {
         </div>
       </section>
 
+      {/* MODAL: RFID / Barcode Scanner Simulator */}
+      {activeModal === 'scan' && (
+        <div className="fixed inset-0 bg-wharton-navy/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-canvas border border-wharton-navy max-w-md w-full p-6 shadow-2xl relative">
+            <button onClick={() => { setActiveModal(null); setScannerStatus('idle'); }} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy"><X className="w-5 h-5" /></button>
+            <div className="flex items-center gap-2 text-wharton-red text-xs uppercase tracking-widest font-semibold mb-1">
+              <ScanBarcode className="w-4 h-4" /> Physical Shelf Interaction
+            </div>
+            <h3 className="font-serif text-2xl text-wharton-navy mb-1">RFID & Barcode Scanner</h3>
+            <p className="text-xs text-subtle mb-4">Simulate tapping an RFID sticker or scanning the ISBN barcode on the physical book at 2 Harrison St.</p>
+
+            <div className="border-2 border-dashed border-wharton-navy/30 bg-white p-6 rounded-sm text-center mb-4 relative overflow-hidden">
+              <QrCode className="w-16 h-16 text-wharton-navy/40 mx-auto mb-2 animate-pulse" />
+              <p className="font-serif text-sm text-wharton-navy font-semibold">
+                {scannerStatus === 'scanning' ? 'Reading tag frequency...' : scannerStatus === 'success' ? 'Tag Recognized!' : 'Awaiting physical scan...'}
+              </p>
+              <p className="text-[11px] text-subtle mt-0.5">Position book spine or sticker near optical sensor</p>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">Or Enter Book ID / ISBN / Title:</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    value={scannedCode} 
+                    onChange={(e) => setScannedCode(e.target.value)} 
+                    placeholder="e.g. 978-0593086193 or Clear Thinking"
+                    className="flex-1 bg-white border border-wharton-navy/20 p-2 text-xs font-mono text-wharton-navy" 
+                  />
+                  <button 
+                    onClick={() => handleSimulateScan()}
+                    className="bg-wharton-navy text-white px-4 py-2 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors font-semibold"
+                  >
+                    Scan
+                  </button>
+                </div>
+              </div>
+
+              {scannerStatus === 'not-found' && (
+                <div className="bg-red-50 border border-red-200 text-wharton-red p-2.5 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>No book tag found matching that identifier.</span>
+                </div>
+              )}
+
+              <div className="pt-2 border-t border-wharton-navy/10">
+                <span className="text-[10px] uppercase tracking-wider text-subtle block mb-1.5 font-semibold">Quick Test Shelf Tags:</span>
+                <div className="flex flex-wrap gap-1.5 text-xs">
+                  <button 
+                    onClick={() => handleSimulateScan('Clear Thinking')}
+                    className="bg-white border border-wharton-navy/20 px-2 py-1 text-[11px] hover:border-wharton-navy text-wharton-navy"
+                  >
+                    Clear Thinking (WG'26 Rec)
+                  </button>
+                  <button 
+                    onClick={() => handleSimulateScan('Brick by Brick')}
+                    className="bg-white border border-wharton-navy/20 px-2 py-1 text-[11px] hover:border-wharton-navy text-wharton-navy"
+                  >
+                    Brick by Brick (Faculty)
+                  </button>
+                  <button 
+                    onClick={() => handleSimulateScan('978-0679762881')}
+                    className="bg-white border border-wharton-navy/20 px-2 py-1 text-[11px] hover:border-wharton-navy text-wharton-navy font-mono"
+                  >
+                    High Output Mgmt (ISBN)
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL 1: PennID Verification Modal */}
       {activeModal === 'verify' && (
         <div className="fixed inset-0 bg-wharton-navy/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -646,7 +746,7 @@ export default function Home() {
               disabled={isSubmittingRequest}
               className="w-full bg-wharton-navy text-white py-3 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors flex items-center justify-center gap-2 font-semibold disabled:opacity-50"
             >
-              <Send className="w-4 h-4" /> {isSubmittingRequest ? 'Submitting Request...' : 'REQUEST TO BORROW'}
+              <Send className="w-4 h-4" /> {isSubmittingRequest ? 'Submitting...' : 'CONFIRM RFID CHECK-OUT'}
             </button>
           </div>
         </div>
