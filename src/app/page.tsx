@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Search, Sparkles, MapPin, HeartHandshake, CheckCircle2, X, AlertCircle, RotateCcw, Gift, ShieldCheck, Lock, Download, RefreshCw, Calendar, BookOpen, UserCheck, Send, ScanBarcode, QrCode } from 'lucide-react';
+import { Search, Sparkles, MapPin, HeartHandshake, CheckCircle2, X, AlertCircle, RotateCcw, Gift, ShieldCheck, Lock, Download, RefreshCw, Calendar, UserCheck, ScanBarcode, QrCode } from 'lucide-react';
 
 interface Book {
   id: string;
@@ -27,9 +27,9 @@ export default function Home() {
   });
 
   const [verificationError, setVerificationError] = useState('');
-  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
+  const [isSubmittingCheckout, setIsSubmittingCheckout] = useState(false);
 
-  // RFID Scanner Simulation States
+  // RFID / Optical Scan Simulator States
   const [scannedCode, setScannedCode] = useState('');
   const [scannerStatus, setScannerStatus] = useState<'idle' | 'scanning' | 'success' | 'not-found'>('idle');
 
@@ -52,7 +52,7 @@ export default function Home() {
     }
   }, []);
 
-  const [activeModal, setActiveModal] = useState<'verify' | 'pdp' | 'request-confirm' | 'return-confirm' | 'scan' | 'donate' | 'admin-login' | 'admin-panel' | null>(null);
+  const [activeModal, setActiveModal] = useState<'verify' | 'pdp' | 'checkout-confirm' | 'return-confirm' | 'scan' | 'donate' | 'admin-login' | 'admin-panel' | null>(null);
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -200,7 +200,6 @@ export default function Home() {
     { id: '91', title: "Working Backwards", author: "Colin Bryar & Bill Carr", isbn: "978-1250267597", tags: ["Operations", "Scaling", "Leadership & Culture"], shelf: "Dewey 658 - Amazon Culture", isCheckedOut: false }
   ]);
 
-  // RFID Scan Lookup Simulator
   const handleSimulateScan = (codeToScan?: string) => {
     const targetCode = (codeToScan || scannedCode).trim().toLowerCase();
     if (!targetCode) return;
@@ -218,14 +217,18 @@ export default function Home() {
         setScannerStatus('success');
         setSelectedBook(found);
         setTimeout(() => {
-          setActiveModal(found.isCheckedOut ? 'return-confirm' : 'request-confirm');
+          if (found.isCheckedOut) {
+            setActiveModal('return-confirm');
+          } else {
+            setActiveModal(user.isVerified ? 'checkout-confirm' : 'verify');
+          }
           setScannerStatus('idle');
           setScannedCode('');
-        }, 600);
+        }, 500);
       } else {
         setScannerStatus('not-found');
       }
-    }, 700);
+    }, 600);
   };
 
   const handleAdminLoginSubmit = (e: React.FormEvent) => {
@@ -301,20 +304,20 @@ export default function Home() {
     localStorage.setItem('glover_library_user', JSON.stringify(verifiedProfile));
 
     if (selectedBook) {
-      setActiveModal('request-confirm');
+      setActiveModal('checkout-confirm');
     } else {
       setActiveModal(null);
     }
   };
 
-  const handleInitiateRequest = (book: Book) => {
+  const handleInitiateBorrow = (book: Book) => {
     setSelectedBook(book);
 
     const savedUser = localStorage.getItem('glover_library_user');
     const isAlreadyVerified = user.isVerified || (savedUser && JSON.parse(savedUser).isVerified);
 
     if (isAlreadyVerified) {
-      setActiveModal('request-confirm');
+      setActiveModal('checkout-confirm');
     } else {
       setActiveModal('verify');
     }
@@ -332,9 +335,9 @@ export default function Home() {
     alert("Book return logged! Please return the book to its shelf position.");
   };
 
-  const handleConfirmBorrowRequest = async () => {
+  const handleConfirmBorrow = async () => {
     if (!selectedBook) return;
-    setIsSubmittingRequest(true);
+    setIsSubmittingCheckout(true);
 
     const calculatedDue = getCalculatedDueDate();
     const currentTimestamp = new Date().toLocaleString('en-US', {
@@ -343,7 +346,6 @@ export default function Home() {
       timeStyle: 'medium',
     });
 
-    // 1. Update UI state locally
     setBooks(prev => prev.map(b => b.id === selectedBook.id ? {
       ...b,
       isCheckedOut: true,
@@ -352,7 +354,6 @@ export default function Home() {
       dueDate: calculatedDue
     } : b));
 
-    // 2. Fire Nodemailer endpoint
     try {
       await fetch('/api/send-checkout', {
         method: 'POST',
@@ -364,15 +365,16 @@ export default function Home() {
           bookTitle: selectedBook.title,
           bookAuthor: selectedBook.author,
           shelf: selectedBook.shelf,
-          requestTimestamp: currentTimestamp
+          checkoutTimestamp: currentTimestamp,
+          dueDate: calculatedDue
         }),
       });
     } catch (err) {
       console.error("Failed to notify library admin", err);
     } finally {
-      setIsSubmittingRequest(false);
+      setIsSubmittingCheckout(false);
       setActiveModal(null);
-      alert(`RFID check-out recorded! The librarian team has been notified. Confirmation sent to ${user.email}.`);
+      alert(`Check-out recorded! You can pick up the volume directly from ${selectedBook.shelf} at 2 Harrison St. Confirmation sent to ${user.email}.`);
     }
   };
 
@@ -434,13 +436,13 @@ export default function Home() {
             onClick={() => setActiveModal('scan')}
             className="flex items-center gap-1.5 bg-wharton-navy text-white px-3.5 py-2 text-xs tracking-wider uppercase hover:bg-wharton-red transition-colors font-semibold shadow-sm"
           >
-            <ScanBarcode className="w-4 h-4" /> Scan RFID / ISBN
+            <ScanBarcode className="w-4 h-4" /> Scan RFID / Barcode
           </button>
           <button 
             onClick={() => setActiveModal(isAdminLoggedIn ? 'admin-panel' : 'admin-login')}
             className="flex items-center gap-1.5 border border-wharton-navy/20 text-wharton-navy px-3 py-2 text-xs tracking-wider uppercase hover:bg-wharton-navy hover:text-white transition-colors"
           >
-            <Lock className="w-3.5 h-3.5 text-wharton-red" /> {isAdminLoggedIn ? 'Admin Active' : 'Admin'}
+            <Lock className="w-3.5 h-3.5 text-wharton-red" /> {isAdminLoggedIn ? 'Admin Active' : 'Admin Portal'}
           </button>
           <button 
             onClick={() => setActiveModal('donate')}
@@ -452,7 +454,7 @@ export default function Home() {
             onClick={() => setActiveModal('verify')}
             className={`flex items-center gap-1.5 border px-3.5 py-2 text-xs tracking-wider uppercase transition-colors ${user.isVerified ? 'border-emerald-700 text-emerald-800 bg-emerald-50' : 'border-wharton-navy/20 text-wharton-navy hover:bg-wharton-navy hover:text-white'}`}
           >
-            <UserCheck className="w-4 h-4 text-wharton-red" /> {user.isVerified ? `✓ ${user.name.split(' ')[0]}` : 'Verify PennID'}
+            <UserCheck className="w-4 h-4 text-wharton-red" /> {user.isVerified ? `✓ ${user.name.split(' ')[0]}` : 'Verify PennID Card'}
           </button>
         </div>
       </header>
@@ -460,16 +462,16 @@ export default function Home() {
       {/* Editorial Hero */}
       <section className="px-6 py-12 md:px-16 max-w-5xl mx-auto text-center">
         <span className="inline-block border border-wharton-navy/20 px-3 py-1 text-xs uppercase tracking-widest text-wharton-navy mb-4">
-          By WEMBA, For WEMBA • Scan & Request Prototype
+          By WEMBA, For WEMBA • RFID / Optical Checkout System
         </span>
         <h2 className="font-serif text-3xl md:text-5xl leading-tight text-wharton-navy mb-4">
           Where community meets access — extending learning beyond the classroom.
         </h2>
         <p className="text-sm md:text-base text-charcoal/80 max-w-2xl mx-auto mb-8 leading-relaxed">
-          Founded and curated by <strong>Gerald Glover (WG’26)</strong>, Glover Library is a self-sustaining knowledge hub. Scan physical tags on the shelf at 2 Harrison St or submit a digital check-out.
+          Founded and curated by <strong>Gerald Glover (WG’26)</strong>, Glover Library is a self-sustaining knowledge hub. Scan shelf tags at 2 Harrison St or check out books directly below.
         </p>
 
-        {/* Smart Search Bar */}
+        {/* Search Bar */}
         <div className="relative max-w-2xl mx-auto">
           <input 
             type="text" 
@@ -488,7 +490,7 @@ export default function Home() {
           <HeartHandshake className="w-8 h-8 text-wharton-red shrink-0" />
           <div>
             <h4 className="font-serif text-xl text-white">Borrow freely. Scan on shelf. Return thoughtfully.</h4>
-            <p className="text-xs text-canvas/70 mt-1">Tap 'Scan RFID / ISBN' to tap-borrow physical books, or browse below to reserve.</p>
+            <p className="text-xs text-canvas/70 mt-1">Tap 'Scan RFID / Barcode' to borrow physical books directly at the shelf.</p>
           </div>
         </div>
       </section>
@@ -571,16 +573,16 @@ export default function Home() {
                 {book.isCheckedOut ? (
                   <button 
                     onClick={() => { setSelectedBook(book); setActiveModal('return-confirm'); }}
-                    className="bg-emerald-700 text-white px-3 py-1.5 text-xs uppercase tracking-wider hover:bg-emerald-800 transition-colors flex items-center gap-1.5"
+                    className="bg-emerald-700 text-white px-3 py-1.5 text-xs uppercase tracking-wider hover:bg-emerald-800 transition-colors flex items-center gap-1.5 font-semibold"
                   >
                     <RotateCcw className="w-3.5 h-3.5" /> Return
                   </button>
                 ) : (
                   <button 
-                    onClick={() => handleInitiateRequest(book)}
+                    onClick={() => handleInitiateBorrow(book)}
                     className="bg-wharton-navy text-white px-3.5 py-1.5 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors flex items-center gap-1.5 font-semibold"
                   >
-                    <BookOpen className="w-3.5 h-3.5" /> Request
+                    <ScanBarcode className="w-3.5 h-3.5" /> Borrow
                   </button>
                 )}
               </div>
@@ -595,17 +597,17 @@ export default function Home() {
           <div className="bg-canvas border border-wharton-navy max-w-md w-full p-6 shadow-2xl relative">
             <button onClick={() => { setActiveModal(null); setScannerStatus('idle'); }} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy"><X className="w-5 h-5" /></button>
             <div className="flex items-center gap-2 text-wharton-red text-xs uppercase tracking-widest font-semibold mb-1">
-              <ScanBarcode className="w-4 h-4" /> Physical Shelf Interaction
+              <ScanBarcode className="w-4 h-4" /> Physical Shelf Optical Sensor
             </div>
-            <h3 className="font-serif text-2xl text-wharton-navy mb-1">RFID & Barcode Scanner</h3>
-            <p className="text-xs text-subtle mb-4">Simulate tapping an RFID sticker or scanning the ISBN barcode on the physical book at 2 Harrison St.</p>
+            <h3 className="font-serif text-2xl text-wharton-navy mb-1">Scan RFID / Barcode</h3>
+            <p className="text-xs text-subtle mb-4">Simulate tapping an RFID chip or reading the barcode of any book on the shelf at 2 Harrison St.</p>
 
             <div className="border-2 border-dashed border-wharton-navy/30 bg-white p-6 rounded-sm text-center mb-4 relative overflow-hidden">
               <QrCode className="w-16 h-16 text-wharton-navy/40 mx-auto mb-2 animate-pulse" />
               <p className="font-serif text-sm text-wharton-navy font-semibold">
-                {scannerStatus === 'scanning' ? 'Reading tag frequency...' : scannerStatus === 'success' ? 'Tag Recognized!' : 'Awaiting physical scan...'}
+                {scannerStatus === 'scanning' ? 'Reading sensor...' : scannerStatus === 'success' ? 'Tag Matched!' : 'Ready for shelf scan'}
               </p>
-              <p className="text-[11px] text-subtle mt-0.5">Position book spine or sticker near optical sensor</p>
+              <p className="text-[11px] text-subtle mt-0.5">Hold sticker or barcode against scanner</p>
             </div>
 
             <div className="space-y-3">
@@ -642,13 +644,13 @@ export default function Home() {
                     onClick={() => handleSimulateScan('Clear Thinking')}
                     className="bg-white border border-wharton-navy/20 px-2 py-1 text-[11px] hover:border-wharton-navy text-wharton-navy"
                   >
-                    Clear Thinking (WG'26 Rec)
+                    Clear Thinking
                   </button>
                   <button 
                     onClick={() => handleSimulateScan('Brick by Brick')}
                     className="bg-white border border-wharton-navy/20 px-2 py-1 text-[11px] hover:border-wharton-navy text-wharton-navy"
                   >
-                    Brick by Brick (Faculty)
+                    Brick by Brick
                   </button>
                   <button 
                     onClick={() => handleSimulateScan('978-0679762881')}
@@ -671,8 +673,8 @@ export default function Home() {
             <div className="flex items-center gap-2 text-wharton-red text-xs uppercase tracking-widest font-semibold mb-1">
               <UserCheck className="w-4 h-4" /> Patron Identity Verification
             </div>
-            <h3 className="font-serif text-2xl text-wharton-navy mb-1">Verify PennID</h3>
-            <p className="text-xs text-subtle mb-4">Please enter your full name and official Penn email to request books from Glover Library.</p>
+            <h3 className="font-serif text-2xl text-wharton-navy mb-1">Verify PennID Card</h3>
+            <p className="text-xs text-subtle mb-4">Please enter your full name and official Penn email to borrow books from Glover Library.</p>
 
             <form onSubmit={handleVerifySubmit} className="space-y-4">
               <div>
@@ -711,21 +713,21 @@ export default function Home() {
                 type="submit"
                 className="w-full mt-2 bg-wharton-navy text-white py-3 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors font-semibold flex items-center justify-center gap-2"
               >
-                <CheckCircle2 className="w-4 h-4" /> VERIFY
+                <CheckCircle2 className="w-4 h-4" /> VERIFY PENNID
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL 2: Request Confirmation Modal */}
-      {activeModal === 'request-confirm' && selectedBook && (
+      {/* MODAL 2: Check-out Confirmation Modal */}
+      {activeModal === 'checkout-confirm' && selectedBook && (
         <div className="fixed inset-0 bg-wharton-navy/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-canvas border border-wharton-navy max-w-md w-full p-6 shadow-2xl relative">
             <button onClick={() => setActiveModal(null)} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy"><X className="w-5 h-5" /></button>
             
             <div className="flex items-center gap-2 text-emerald-700 text-xs uppercase tracking-widest font-semibold mb-1">
-              <CheckCircle2 className="w-4 h-4" /> Verified Patron
+              <CheckCircle2 className="w-4 h-4" /> Verified Penn Patron
             </div>
             <h3 className="font-serif text-2xl text-wharton-navy mt-1 mb-4">{selectedBook.title}</h3>
 
@@ -742,11 +744,11 @@ export default function Home() {
             </div>
 
             <button 
-              onClick={handleConfirmBorrowRequest}
-              disabled={isSubmittingRequest}
+              onClick={handleConfirmBorrow}
+              disabled={isSubmittingCheckout}
               className="w-full bg-wharton-navy text-white py-3 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors flex items-center justify-center gap-2 font-semibold disabled:opacity-50"
             >
-              <Send className="w-4 h-4" /> {isSubmittingRequest ? 'Submitting...' : 'CONFIRM RFID CHECK-OUT'}
+              <ScanBarcode className="w-4 h-4" /> {isSubmittingCheckout ? 'Logging Checkout...' : 'CONFIRM SHELF CHECK-OUT'}
             </button>
           </div>
         </div>
@@ -792,16 +794,16 @@ export default function Home() {
               {selectedBook.isCheckedOut ? (
                 <button 
                   onClick={() => setActiveModal('return-confirm')}
-                  className="bg-emerald-700 text-white px-4 py-2 text-xs uppercase tracking-wider hover:bg-emerald-800 transition-colors flex items-center gap-2"
+                  className="bg-emerald-700 text-white px-4 py-2 text-xs uppercase tracking-wider hover:bg-emerald-800 transition-colors flex items-center gap-2 font-semibold"
                 >
                   <RotateCcw className="w-4 h-4" /> Return to Shelf
                 </button>
               ) : (
                 <button 
-                  onClick={() => handleInitiateRequest(selectedBook)}
+                  onClick={() => handleInitiateBorrow(selectedBook)}
                   className="bg-wharton-navy text-white px-4 py-2 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors flex items-center gap-2 font-semibold"
                 >
-                  <BookOpen className="w-4 h-4" /> Request Book
+                  <ScanBarcode className="w-4 h-4" /> Borrow Book
                 </button>
               )}
             </div>
@@ -844,7 +846,7 @@ export default function Home() {
               <Gift className="w-4 h-4" /> Cohort Contribution
             </div>
             <h3 className="font-serif text-2xl text-wharton-navy mb-1">Donate a Book</h3>
-            <p className="text-xs text-subtle mb-4">Enrich our collection by contributing a book.</p>
+            <p className="text-xs text-subtle mb-4">Enrich our collection by contributing a book to the physical library.</p>
 
             <div className="bg-white p-3.5 border-l-2 border-wharton-red border-y border-r border-wharton-navy/15 mb-5 text-xs">
               <span className="text-[10px] uppercase tracking-widest text-wharton-red font-bold block mb-1">Drop Off Location:</span>
