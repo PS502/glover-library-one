@@ -1085,7 +1085,7 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="border-t border-wharton-navy/10 py-8 px-6 md:px-16 text-center text-xs text-subtle">
-        <p>Glover Library • WEMBA Executive MBA Program • San Francisco</p>
+        <p>Glover Library • Wharton Executive MBA Program • San Francisco</p>
         <p className="mt-1 font-medium text-wharton-navy">App developed by Pooja S • Curated by Gerald Glover (WG’26)</p>
       </footer>
     </div>
