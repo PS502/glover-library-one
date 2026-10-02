@@ -265,27 +265,7 @@ if (selectedBook) {
   };
 
   // PennCard Visual Verification & OCR Parser
-  const handlePennCardUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setOcrProcessing(true);
-    setOcrError('');
-
-    try {
-      const { data: { text } } = await Tesseract.recognize(file, 'eng');
-      const clean = text.toUpperCase();
-
-      // 1. PennCard Visual Header Validation
-      const hasPennCardHeader = clean.includes('PENNCARD');
-      const hasUniversityPenn = clean.includes('PENNSYLVANIA') || clean.includes('UNIVERSITY');
-
-      if (!hasPennCardHeader && !hasUniversityPenn) {
-        setOcrError('Image rejected: Not a valid PennCard visual. Please capture a clear image of an official University of Pennsylvania PennCard.');
-        setOcrProcessing(false);
-        return;
-      }
-
+ 
       // 2. Extract 8-digit PennID Number
       const pennIdMatch = text.match(/\b\d{8}\b/);
       const pennId = pennIdMatch ? pennIdMatch[0] : '';
