@@ -181,11 +181,11 @@ export default function Home() {
     setUser(updatedUser);
     localStorage.setItem('glover_library_user', JSON.stringify(updatedUser));
 
-    if (selectedBook) {
-      setActiveModal('checkout');
-    } else {
-      setActiveModal(null);
-    }
+if (selectedBook) {
+  setActiveModal('checkout-confirm');
+} else {
+  setActiveModal(null);
+}
   };
 
   // RFID / Optical Scan Simulator States
