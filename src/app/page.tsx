@@ -515,7 +515,7 @@ export default function Home() {
     setUser(verifiedProfile);
     localStorage.setItem('glover_library_user', JSON.stringify(verifiedProfile));
 
-    if (selectedBook) {
+if (selectedBook) {
       setActiveModal('checkout-confirm');
     } else {
       setActiveModal(null);
