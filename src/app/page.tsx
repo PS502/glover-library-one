@@ -24,20 +24,169 @@ interface Book {
 }
 
 export default function Home() {
+ // User Profile State
   const [user, setUser] = useState({
     name: '',
+    pennId: '',
+    cohort: "WG'26",
     email: '',
-    pennKey: '',
+    phone: '',
     isVerified: false,
+    pennIdPhoto: null as string | null,
   });
 
-  const [verificationError, setVerificationError] = useState('');
-  const [isSubmittingCheckout, setIsSubmittingCheckout] = useState(false);
-
-  // Optical Character Recognition (OCR) States for PennCard
-  const [ocrProcessing, setOcrProcessing] = useState(false);
+  // Photo, Preview & Enhanced OCR States
+  const [uploadPreview, setUploadPreview] = useState<string | null>(null);
+  const [isScanningPhoto, setIsScanningPhoto] = useState(false);
   const [ocrError, setOcrError] = useState('');
-  const [detectedPennId, setDetectedPennId] = useState('');
+  const [ocrSuccess, setOcrSuccess] = useState('');
+
+  // Offscreen Preprocessing to dramatically boost Tesseract accuracy
+  const preprocessImage = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(e.target?.result as string);
+            return;
+          }
+
+          // Scale for higher DPI text recognition
+          const scale = Math.max(1, 1200 / img.width);
+          canvas.width = img.width * scale;
+          canvas.height = img.height * scale;
+
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = imgData.data;
+
+          // Grayscale & High Contrast Thresholding
+          for (let i = 0; i < data.length; i += 4) {
+            const avg = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114);
+            const highContrast = avg > 130 ? 255 : avg < 90 ? 0 : avg;
+            data[i] = highContrast;
+            data[i + 1] = highContrast;
+            data[i + 2] = highContrast;
+          }
+
+          ctx.putImageData(imgData, 0, 0);
+          resolve(canvas.toDataURL('image/jpeg', 0.9));
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsScanningPhoto(true);
+    setOcrError('');
+    setOcrSuccess('');
+
+    try {
+      // 1. Generate clean preview & run high-contrast preprocessing
+      const processedDataUrl = await preprocessImage(file);
+      setUploadPreview(processedDataUrl);
+
+      // 2. Pass 1: Digits-Only pass for 8-digit PennID
+      const idWorkerResult = await Tesseract.recognize(processedDataUrl, 'eng', {
+        tessedit_char_whitelist: '0123456789',
+      } as any);
+
+      const idMatch = idWorkerResult.data.text.match(/\b\d{8}\b/);
+      let detectedPennId = idMatch ? idMatch[0] : '';
+
+      // 3. Pass 2: Layout / Name pass
+      const fullTextResult = await Tesseract.recognize(file, 'eng');
+      const cleanUpper = fullTextResult.data.text.toUpperCase();
+
+      // Card Header Validation
+      const hasPennCardHeader = cleanUpper.includes('PENN') || cleanUpper.includes('PENNCARD') || cleanUpper.includes('UNIVERSITY');
+      if (!hasPennCardHeader) {
+        setOcrError('Card visual warning: Official banner not clearly detected. Please verify or edit your fields below.');
+      }
+
+      // If digits pass missed, check raw text regex
+      if (!detectedPennId) {
+        const rawDigitsMatch = fullTextResult.data.text.match(/\b\d{8}\b/);
+        if (rawDigitsMatch) detectedPennId = rawDigitsMatch[0];
+      }
+
+      // Filter out boilerplate noise words
+      const ignoreWords = ['PENNCARD', 'PENNSYLVANIA', 'UNIVERSITY', 'WHARTON', 'SAMPLE', 'UNDERGRADUATE', 'GRADUATE', 'FACULTY', 'STAFF', 'EXPIRES', 'STUDENT'];
+      const candidateLines = fullTextResult.data.text
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => l.length > 2 && !ignoreWords.some(w => l.toUpperCase().includes(w)) && !/\d/.test(l));
+
+      const detectedName = candidateLines.length > 0 ? candidateLines[0] : '';
+      const autoPennKey = detectedName ? detectedName.toLowerCase().replace(/[^a-z]/g, '').slice(0, 8) : '';
+
+      setUser(prev => ({
+        ...prev,
+        name: detectedName || prev.name,
+        pennId: detectedPennId || prev.pennId,
+        email: prev.email || (autoPennKey ? `${autoPennKey}@wharton.upenn.edu` : prev.email),
+        pennIdPhoto: processedDataUrl
+      }));
+
+      if (detectedPennId || detectedName) {
+        setOcrSuccess(`Extracted: ${detectedName ? detectedName : ''} ${detectedPennId ? `• PennID: ${detectedPennId}` : ''}`);
+      }
+    } catch (err) {
+      console.error(err);
+      setOcrError('OCR processing encountered an issue. Please manually fill in your fields below.');
+    } finally {
+      setIsScanningPhoto(false);
+    }
+  };
+
+  const handleSaveVerification = (e: React.FormEvent) => {
+    e.preventDefault();
+    setOcrError('');
+
+    // Rule: Alert triggered if photo preview, name, pennId, cohort, email, or phone is empty
+    if (!uploadPreview && !user.pennIdPhoto) {
+      alert("Mandatory: Please upload a photo of your physical PennID card.");
+      return;
+    }
+    if (!user.name.trim() || !user.pennId.trim() || !user.cohort.trim() || !user.email.trim() || !user.phone.trim()) {
+      alert("Mandatory: All fields (Photo, Name, PennID, Program/Cohort, Email, and Phone Number) are required to complete verification.");
+      return;
+    }
+
+    // HTML / JS Domain Check
+    const cleanEmail = user.email.trim().toLowerCase();
+    if (!cleanEmail.endsWith('penn.edu')) {
+      alert("Invalid Email: Your Penn Email must end with penn.edu (e.g. username@wharton.upenn.edu).");
+      return;
+    }
+
+    const updatedUser = {
+      ...user,
+      name: user.name.trim(),
+      pennId: user.pennId.trim(),
+      email: cleanEmail,
+      pennIdPhoto: uploadPreview || user.pennIdPhoto,
+      isVerified: true
+    };
+
+    setUser(updatedUser);
+    localStorage.setItem('glover_library_user', JSON.stringify(updatedUser));
+
+    if (selectedBook) {
+      setActiveModal('checkout');
+    } else {
+      setActiveModal(null);
+    }
+  };
 
   // RFID / Optical Scan Simulator States
   const [scannedCode, setScannedCode] = useState('');
