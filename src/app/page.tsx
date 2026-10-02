@@ -1,12 +1,27 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import Tesseract from 'tesseract.js';
 import { 
-  Search, Sparkles, MapPin, HeartHandshake, CheckCircle2, X, AlertCircle, 
-  RotateCcw, Gift, ShieldCheck, Lock, Download, RefreshCw, Calendar, 
-  UserCheck, ScanBarcode, QrCode, Camera 
+  Search, 
+  Camera, 
+  Sparkles, 
+  MapPin, 
+  HeartHandshake, 
+  CheckCircle2, 
+  X, 
+  Radio, 
+  Upload, 
+  AlertCircle, 
+  RotateCcw, 
+  Gift, 
+  ShieldCheck, 
+  Lock, 
+  Download, 
+  RefreshCw, 
+  Calendar, 
+  ShieldAlert 
 } from 'lucide-react';
+import Tesseract from 'tesseract.js';
 
 interface Book {
   id: string;
@@ -20,11 +35,12 @@ interface Book {
   isCheckedOut: boolean;
   checkedOutBy?: string;
   borrowerEmail?: string;
+  borrowerPhone?: string;
   dueDate?: string;
 }
 
 export default function Home() {
- // User Profile State
+  // User Profile State
   const [user, setUser] = useState({
     name: '',
     pennId: '',
@@ -35,183 +51,21 @@ export default function Home() {
     pennIdPhoto: null as string | null,
   });
 
-  // Photo, Preview & Enhanced OCR States
-  const [uploadPreview, setUploadPreview] = useState<string | null>(null);
-  const [isScanningPhoto, setIsScanningPhoto] = useState(false);
-  const [ocrError, setOcrError] = useState('');
-  const [ocrSuccess, setOcrSuccess] = useState('');
-
-  // Offscreen Preprocessing to dramatically boost Tesseract accuracy
-  const preprocessImage = (file: File): Promise<string> => {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            resolve(e.target?.result as string);
-            return;
-          }
-
-          // Scale for higher DPI text recognition
-          const scale = Math.max(1, 1200 / img.width);
-          canvas.width = img.width * scale;
-          canvas.height = img.height * scale;
-
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const data = imgData.data;
-
-          // Grayscale & High Contrast Thresholding
-          for (let i = 0; i < data.length; i += 4) {
-            const avg = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114);
-            const highContrast = avg > 130 ? 255 : avg < 90 ? 0 : avg;
-            data[i] = highContrast;
-            data[i + 1] = highContrast;
-            data[i + 2] = highContrast;
-          }
-
-          ctx.putImageData(imgData, 0, 0);
-          resolve(canvas.toDataURL('image/jpeg', 0.9));
-        };
-        img.src = e.target?.result as string;
-      };
-      reader.readAsDataURL(file);
-    });
-  };
-
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsScanningPhoto(true);
-    setOcrError('');
-    setOcrSuccess('');
-
-    try {
-      // 1. Generate clean preview & run high-contrast preprocessing
-      const processedDataUrl = await preprocessImage(file);
-      setUploadPreview(processedDataUrl);
-
-      // 2. Pass 1: Digits-Only pass for 8-digit PennID
-      const idWorkerResult = await Tesseract.recognize(processedDataUrl, 'eng', {
-        tessedit_char_whitelist: '0123456789',
-      } as any);
-
-      const idMatch = idWorkerResult.data.text.match(/\b\d{8}\b/);
-      let detectedPennId = idMatch ? idMatch[0] : '';
-
-      // 3. Pass 2: Layout / Name pass
-      const fullTextResult = await Tesseract.recognize(file, 'eng');
-      const cleanUpper = fullTextResult.data.text.toUpperCase();
-
-      // Card Header Validation
-      const hasPennCardHeader = cleanUpper.includes('PENN') || cleanUpper.includes('PENNCARD') || cleanUpper.includes('UNIVERSITY');
-      if (!hasPennCardHeader) {
-        setOcrError('Card visual warning: Official banner not clearly detected. Please verify or edit your fields below.');
-      }
-
-      // If digits pass missed, check raw text regex
-      if (!detectedPennId) {
-        const rawDigitsMatch = fullTextResult.data.text.match(/\b\d{8}\b/);
-        if (rawDigitsMatch) detectedPennId = rawDigitsMatch[0];
-      }
-
-      // Filter out boilerplate noise words
-      const ignoreWords = ['PENNCARD', 'PENNSYLVANIA', 'UNIVERSITY', 'WHARTON', 'SAMPLE', 'UNDERGRADUATE', 'GRADUATE', 'FACULTY', 'STAFF', 'EXPIRES', 'STUDENT'];
-      const candidateLines = fullTextResult.data.text
-        .split('\n')
-        .map(l => l.trim())
-        .filter(l => l.length > 2 && !ignoreWords.some(w => l.toUpperCase().includes(w)) && !/\d/.test(l));
-
-      const detectedName = candidateLines.length > 0 ? candidateLines[0] : '';
-      const autoPennKey = detectedName ? detectedName.toLowerCase().replace(/[^a-z]/g, '').slice(0, 8) : '';
-
-      setUser(prev => ({
-        ...prev,
-        name: detectedName || prev.name,
-        pennId: detectedPennId || prev.pennId,
-        email: prev.email || (autoPennKey ? `${autoPennKey}@wharton.upenn.edu` : prev.email),
-        pennIdPhoto: processedDataUrl
-      }));
-
-      if (detectedPennId || detectedName) {
-        setOcrSuccess(`Extracted: ${detectedName ? detectedName : ''} ${detectedPennId ? `• PennID: ${detectedPennId}` : ''}`);
-      }
-    } catch (err) {
-      console.error(err);
-      setOcrError('OCR processing encountered an issue. Please manually fill in your fields below.');
-    } finally {
-      setIsScanningPhoto(false);
-    }
-  };
-
-  const handleSaveVerification = (e: React.FormEvent) => {
-    e.preventDefault();
-    setOcrError('');
-
-    // Rule: Alert triggered if photo preview, name, pennId, cohort, email, or phone is empty
-    if (!uploadPreview && !user.pennIdPhoto) {
-      alert("Mandatory: Please upload a photo of your physical PennID card.");
-      return;
-    }
-    if (!user.name.trim() || !user.pennId.trim() || !user.cohort.trim() || !user.email.trim() || !user.phone.trim()) {
-      alert("Mandatory: All fields (Photo, Name, PennID, Program/Cohort, Email, and Phone Number) are required to complete verification.");
-      return;
-    }
-
-    // HTML / JS Domain Check
-    const cleanEmail = user.email.trim().toLowerCase();
-    if (!cleanEmail.endsWith('penn.edu')) {
-      alert("Invalid Email: Your Penn Email must end with penn.edu (e.g. username@wharton.upenn.edu).");
-      return;
-    }
-
-    const updatedUser = {
-      ...user,
-      name: user.name.trim(),
-      pennId: user.pennId.trim(),
-      email: cleanEmail,
-      pennIdPhoto: uploadPreview || user.pennIdPhoto,
-      isVerified: true
-    };
-
-    setUser(updatedUser);
-    localStorage.setItem('glover_library_user', JSON.stringify(updatedUser));
-
-if (selectedBook) {
-  setActiveModal('checkout-confirm');
-} else {
-  setActiveModal(null);
-}
-  };
-
-  // RFID / Optical Scan Simulator States
-  const [scannedCode, setScannedCode] = useState('');
-  const [scannerStatus, setScannerStatus] = useState<'idle' | 'scanning' | 'success' | 'not-found'>('idle');
-
   // Admin Mode States
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
   const [adminPasscode, setAdminPasscode] = useState('');
   const [adminError, setAdminError] = useState(false);
 
-  useEffect(() => {
-    const savedUser = localStorage.getItem('glover_library_user');
-    if (savedUser) {
-      try {
-        const parsed = JSON.parse(savedUser);
-        if (parsed.isVerified && parsed.email?.toLowerCase().endsWith('penn.edu')) {
-          setUser(parsed);
-        }
-      } catch (e) {
-        console.error("Failed to parse saved user state", e);
-      }
-    }
-  }, []);
+  // Optical Character Recognition (OCR) States
+  const [uploadPreview, setUploadPreview] = useState<string | null>(null);
+  const [isScanningPhoto, setIsScanningPhoto] = useState(false);
+  const [ocrError, setOcrError] = useState('');
+  const [ocrSuccess, setOcrSuccess] = useState('');
 
-  const [activeModal, setActiveModal] = useState<'verify' | 'pdp' | 'checkout-confirm' | 'return-confirm' | 'scan' | 'donate' | 'admin-login' | 'admin-panel' | null>(null);
+  // Active Modals & Filters
+  const [activeModal, setActiveModal] = useState<
+    'verify' | 'pdp' | 'rfid-scanning' | 'return-scanning' | 'checkout' | 'return-confirm' | 'donate' | 'admin-login' | 'admin-panel' | 'verify-reminder' | null
+  >(null);
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -241,13 +95,181 @@ if (selectedBook) {
     'Literature & Society'
   ];
 
+  useEffect(() => {
+    const savedUser = localStorage.getItem('glover_library_user');
+    if (savedUser) {
+      try {
+        const parsed = JSON.parse(savedUser);
+        if (parsed.isVerified) {
+          setUser(parsed);
+        }
+      } catch (e) {
+        console.error("Failed to parse saved user state", e);
+      }
+    }
+  }, []);
+
+  // Bilinear Canvas Preprocessing to boost Tesseract accuracy
+  const preprocessImage = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(e.target?.result as string);
+            return;
+          }
+
+          const scale = Math.max(1, 1200 / img.width);
+          canvas.width = img.width * scale;
+          canvas.height = img.height * scale;
+
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = imgData.data;
+
+          // Grayscale & High Contrast Thresholding
+          for (let i = 0; i < data.length; i += 4) {
+            const avg = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+            const highContrast = avg > 130 ? 255 : avg < 90 ? 0 : avg;
+            data[i] = highContrast;
+            data[i + 1] = highContrast;
+            data[i + 2] = highContrast;
+          }
+
+          ctx.putImageData(imgData, 0, 0);
+          resolve(canvas.toDataURL('image/jpeg', 0.9));
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Dual-Pass High Accuracy OCR Handler
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsScanningPhoto(true);
+    setOcrError('');
+    setOcrSuccess('');
+
+    try {
+      const processedDataUrl = await preprocessImage(file);
+      setUploadPreview(processedDataUrl);
+
+      // Pass 1: Digits-only whitelist targeting the 8-digit PennID
+      const idWorkerResult = await Tesseract.recognize(processedDataUrl, 'eng', {
+        tessedit_char_whitelist: '0123456789',
+      } as any);
+
+      const idMatch = idWorkerResult.data.text.match(/\b\d{8}\b/);
+      let detectedPennId = idMatch ? idMatch[0] : '';
+
+      // Pass 2: Layout / Name reading
+      const fullTextResult = await Tesseract.recognize(file, 'eng');
+      const cleanUpper = fullTextResult.data.text.toUpperCase();
+
+      const hasPennCardHeader =
+        cleanUpper.includes('PENN') ||
+        cleanUpper.includes('PENNCARD') ||
+        cleanUpper.includes('UNIVERSITY');
+
+      if (!hasPennCardHeader) {
+        setOcrError('Card visual warning: Official banner not clearly detected. Please verify or edit your fields below.');
+      }
+
+      if (!detectedPennId) {
+        const rawDigitsMatch = fullTextResult.data.text.match(/\b\d{8}\b/);
+        if (rawDigitsMatch) detectedPennId = rawDigitsMatch[0];
+      }
+
+      // Filter noise words
+      const ignoreWords = [
+        'PENNCARD', 'PENNSYLVANIA', 'UNIVERSITY', 'WHARTON', 'SAMPLE', 
+        'UNDERGRADUATE', 'GRADUATE', 'FACULTY', 'STAFF', 'EXPIRES', 'STUDENT'
+      ];
+      const candidateLines = fullTextResult.data.text
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(
+          (l) => l.length > 2 && !ignoreWords.some((w) => l.toUpperCase().includes(w)) && !/\d/.test(l)
+        );
+
+      const detectedName = candidateLines.length > 0 ? candidateLines[0] : '';
+      const autoPennKey = detectedName ? detectedName.toLowerCase().replace(/[^a-z]/g, '').slice(0, 8) : '';
+
+      setUser((prev) => ({
+        ...prev,
+        name: detectedName || prev.name,
+        pennId: detectedPennId || prev.pennId,
+        email: prev.email || (autoPennKey ? `${autoPennKey}@wharton.upenn.edu` : prev.email),
+        pennIdPhoto: processedDataUrl
+      }));
+
+      if (detectedPennId || detectedName) {
+        setOcrSuccess(
+          `Extracted: ${detectedName ? detectedName : ''} ${detectedPennId ? `• PennID: ${detectedPennId}` : ''}`
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      setOcrError('OCR processing encountered an issue. Please manually fill in your fields below.');
+    } finally {
+      setIsScanningPhoto(false);
+    }
+  };
+
+  // Form Validation & Session Storage
+  const handleSaveVerification = (e: React.FormEvent) => {
+    e.preventDefault();
+    setOcrError('');
+
+    if (!uploadPreview && !user.pennIdPhoto) {
+      alert("Mandatory: Please upload a photo of your physical PennID card.");
+      return;
+    }
+    if (!user.name.trim() || !user.pennId.trim() || !user.cohort.trim() || !user.email.trim() || !user.phone.trim()) {
+      alert("Mandatory: All fields (Photo, Name, PennID, Program/Cohort, Email, and Phone Number) are required to complete verification.");
+      return;
+    }
+
+    const cleanEmail = user.email.trim().toLowerCase();
+    if (!cleanEmail.endsWith('penn.edu')) {
+      alert("Invalid Email: Your Penn Email must end with penn.edu (e.g. username@wharton.upenn.edu).");
+      return;
+    }
+
+    const updatedUser = {
+      ...user,
+      name: user.name.trim(),
+      pennId: user.pennId.trim(),
+      email: cleanEmail,
+      pennIdPhoto: uploadPreview || user.pennIdPhoto,
+      isVerified: true
+    };
+
+    setUser(updatedUser);
+    localStorage.setItem('glover_library_user', JSON.stringify(updatedUser));
+
+    if (selectedBook) {
+      setActiveModal('checkout');
+    } else {
+      setActiveModal(null);
+    }
+  };
+
   const handleTagToggle = (tag: string) => {
     if (tag === 'All') {
       setSelectedTags([]);
       return;
     }
     if (selectedTags.includes(tag)) {
-      setSelectedTags(selectedTags.filter(t => t !== tag));
+      setSelectedTags(selectedTags.filter((t) => t !== tag));
     } else {
       setSelectedTags([...selectedTags, tag]);
     }
@@ -257,44 +279,6 @@ if (selectedBook) {
     const date = new Date();
     date.setDate(date.getDate() + 14);
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  };
-
-  const extractPennKey = (emailAddress: string) => {
-    if (!emailAddress.includes('@')) return '';
-    return emailAddress.split('@')[0].trim().toLowerCase();
-  };
-
-  // PennCard Visual Verification & OCR Parser
- 
-      // 2. Extract 8-digit PennID Number
-      const pennIdMatch = text.match(/\b\d{8}\b/);
-      const pennId = pennIdMatch ? pennIdMatch[0] : '';
-      if (pennId) setDetectedPennId(pennId);
-
-      // 3. Extract Patron Name
-      const ignoreWords = ['PENNCARD', 'PENNSYLVANIA', 'UNIVERSITY', 'SAMPLE', 'UNDERGRADUATE', 'GRADUATE', 'FACULTY', 'STAFF', 'EXPIRES'];
-      const candidateLines = text
-        .split('\n')
-        .map(l => l.trim())
-        .filter(l => l.length > 2 && !ignoreWords.some(w => l.toUpperCase().includes(w)) && !/\d/.test(l));
-
-      const detectedName = candidateLines.length > 0 ? candidateLines[0] : '';
-
-      if (detectedName) {
-        const derivedKey = detectedName.toLowerCase().replace(/[^a-z]/g, '').slice(0, 8);
-        setUser(prev => ({
-          ...prev,
-          name: detectedName,
-          email: prev.email || `${derivedKey}@wharton.upenn.edu`,
-          pennKey: derivedKey,
-        }));
-      }
-    } catch (err) {
-      console.error(err);
-      setOcrError('Failed to parse card text. Ensure adequate lighting and upload a clear photo.');
-    } finally {
-      setOcrProcessing(false);
-    }
   };
 
   // Complete Catalog of 91 Books
@@ -392,37 +376,6 @@ if (selectedBook) {
     { id: '91', title: "Working Backwards", author: "Colin Bryar & Bill Carr", isbn: "978-1250267597", tags: ["Operations", "Scaling", "Leadership & Culture"], shelf: "Dewey 658 - Amazon Culture", isCheckedOut: false }
   ]);
 
-  const handleSimulateScan = (codeToScan?: string) => {
-    const targetCode = (codeToScan || scannedCode).trim().toLowerCase();
-    if (!targetCode) return;
-
-    setScannerStatus('scanning');
-
-    setTimeout(() => {
-      const found = books.find(b => 
-        b.id === targetCode ||
-        (b.isbn && b.isbn.replace(/[^0-9]/g, '').includes(targetCode.replace(/[^0-9]/g, ''))) ||
-        b.title.toLowerCase().includes(targetCode)
-      );
-
-      if (found) {
-        setScannerStatus('success');
-        setSelectedBook(found);
-        setTimeout(() => {
-          if (found.isCheckedOut) {
-            setActiveModal('return-confirm');
-          } else {
-            setActiveModal(user.isVerified ? 'checkout-confirm' : 'verify');
-          }
-          setScannerStatus('idle');
-          setScannedCode('');
-        }, 500);
-      } else {
-        setScannerStatus('not-found');
-      }
-    }, 600);
-  };
-
   const handleAdminLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (adminPasscode === 'Bound2BeAGoodBook') {
@@ -435,25 +388,28 @@ if (selectedBook) {
   };
 
   const handleToggleStockStatus = (bookId: string) => {
-    setBooks(prev => prev.map(b => {
-      if (b.id === bookId) {
-        const isCheckingOut = !b.isCheckedOut;
-        return {
-          ...b,
-          isCheckedOut: isCheckingOut,
-          checkedOutBy: isCheckingOut ? (user.name || 'Admin Override') : undefined,
-          borrowerEmail: isCheckingOut ? (user.email || 'N/A') : undefined,
-          dueDate: isCheckingOut ? getCalculatedDueDate() : undefined
-        };
-      }
-      return b;
-    }));
+    setBooks((prev) =>
+      prev.map((b) => {
+        if (b.id === bookId) {
+          const isCheckingOut = !b.isCheckedOut;
+          return {
+            ...b,
+            isCheckedOut: isCheckingOut,
+            checkedOutBy: isCheckingOut ? (user.name || 'Admin Override') : undefined,
+            borrowerEmail: isCheckingOut ? (user.email || 'N/A') : undefined,
+            borrowerPhone: isCheckingOut ? (user.phone || 'N/A') : undefined,
+            dueDate: isCheckingOut ? getCalculatedDueDate() : undefined
+          };
+        }
+        return b;
+      })
+    );
   };
 
   const handleExportCSV = () => {
-    const headers = ["ID,Title,Author,ISBN,Shelf,Status,CheckedOutBy,BorrowerEmail,DueDate\n"];
-    const rows = books.map(b => 
-      `"${b.id}","${b.title.replace(/"/g, '""')}","${b.author.replace(/"/g, '""')}","${b.isbn || ''}","${b.shelf}","${b.isCheckedOut ? 'Borrowed' : 'Available'}","${b.checkedOutBy || ''}","${b.borrowerEmail || ''}","${b.dueDate || ''}"`
+    const headers = ["ID,Title,Author,ISBN,Shelf,Status,CheckedOutBy,BorrowerEmail,BorrowerPhone,DueDate\n"];
+    const rows = books.map((b) =>
+      `"${b.id}","${b.title.replace(/"/g, '""')}","${b.author.replace(/"/g, '""')}","${b.isbn || ''}","${b.shelf}","${b.isCheckedOut ? 'Borrowed' : 'Available'}","${b.checkedOutBy || ''}","${b.borrowerEmail || ''}","${b.borrowerPhone || ''}","${b.dueDate || ''}"`
     );
     const blob = new Blob([...headers, rows.join("\n")], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
@@ -463,88 +419,74 @@ if (selectedBook) {
     a.click();
   };
 
-  const handleVerifySubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setVerificationError('');
+  const handleSimulateScan = (book: Book) => {
+    setSelectedBook(book);
+    setActiveModal('rfid-scanning');
 
-    if (!user.name.trim()) {
-      setVerificationError('Full Name is required.');
-      return;
-    }
+    setTimeout(() => {
+      const savedUser = localStorage.getItem('glover_library_user');
+      const isVerified = user.isVerified || (savedUser && JSON.parse(savedUser).isVerified);
 
-    const cleanEmail = user.email.trim().toLowerCase();
-    if (!cleanEmail) {
-      setVerificationError('Penn email is required.');
-      return;
-    }
-
-    if (!cleanEmail.endsWith('penn.edu')) {
-      setVerificationError('Please enter a valid Penn email address ending in penn.edu (e.g. username@wharton.upenn.edu).');
-      return;
-    }
-
-    const derivedPennKey = extractPennKey(cleanEmail);
-
-    const verifiedProfile = {
-      name: user.name.trim(),
-      email: cleanEmail,
-      pennKey: derivedPennKey,
-      isVerified: true
-    };
-
-    setUser(verifiedProfile);
-    localStorage.setItem('glover_library_user', JSON.stringify(verifiedProfile));
-
-if (selectedBook) {
-      setActiveModal('checkout-confirm');
-    } else {
-      setActiveModal(null);
-    }
+      if (isVerified) {
+        setActiveModal('checkout');
+      } else {
+        setActiveModal('verify');
+      }
+    }, 1500);
   };
 
-  const handleInitiateBorrow = (book: Book) => {
-    setSelectedBook(book);
+  const handleSimulateReturnScan = (book?: Book) => {
+    const targetBook = book || books.find((b) => b.isCheckedOut) || books[0];
+    setSelectedBook(targetBook);
+    setActiveModal('return-scanning');
 
-    const savedUser = localStorage.getItem('glover_library_user');
-    const isAlreadyVerified = user.isVerified || (savedUser && JSON.parse(savedUser).isVerified);
-
-    if (isAlreadyVerified) {
-      setActiveModal('checkout-confirm');
-    } else {
-      setActiveModal('verify');
-    }
+    setTimeout(() => {
+      setActiveModal('return-confirm');
+    }, 1500);
   };
 
   const handleConfirmReturn = (bookId: string) => {
-    setBooks(prev => prev.map(b => b.id === bookId ? { 
-      ...b, 
-      isCheckedOut: false, 
-      checkedOutBy: undefined, 
-      borrowerEmail: undefined, 
-      dueDate: undefined 
-    } : b));
+    setBooks((prev) =>
+      prev.map((b) =>
+        b.id === bookId
+          ? {
+              ...b,
+              isCheckedOut: false,
+              checkedOutBy: undefined,
+              borrowerEmail: undefined,
+              borrowerPhone: undefined,
+              dueDate: undefined
+            }
+          : b
+      )
+    );
     setActiveModal(null);
-    alert("Book return logged! Please return the book to its shelf position.");
   };
 
-  const handleConfirmBorrow = async () => {
-    if (!selectedBook) return;
-    setIsSubmittingCheckout(true);
+  const handleCheckout = async (bookId: string) => {
+    if (!user.isVerified) {
+      setActiveModal('verify-reminder');
+      return;
+    }
 
     const calculatedDue = getCalculatedDueDate();
-    const currentTimestamp = new Date().toLocaleString('en-US', {
-      timeZone: 'America/Los_Angeles',
-      dateStyle: 'full',
-      timeStyle: 'medium',
-    });
 
-    setBooks(prev => prev.map(b => b.id === selectedBook.id ? {
-      ...b,
-      isCheckedOut: true,
-      checkedOutBy: user.name,
-      borrowerEmail: user.email,
-      dueDate: calculatedDue
-    } : b));
+    setBooks((prev) =>
+      prev.map((b) =>
+        b.id === bookId
+          ? {
+              ...b,
+              isCheckedOut: true,
+              checkedOutBy: user.name || 'Gerald Glover',
+              borrowerEmail: user.email || '',
+              borrowerPhone: user.phone || '',
+              dueDate: calculatedDue
+            }
+          : b
+      )
+    );
+
+    setActiveModal(null);
 
     try {
       await fetch('/api/send-checkout', {
@@ -552,21 +494,14 @@ if (selectedBook) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userEmail: user.email,
-          userName: user.name,
-          pennKey: user.pennKey || extractPennKey(user.email),
-          bookTitle: selectedBook.title,
-          bookAuthor: selectedBook.author,
-          shelf: selectedBook.shelf,
-          checkoutTimestamp: currentTimestamp,
-          dueDate: calculatedDue
+          userName: user.name || 'WEMBA Patron',
+          bookTitle: selectedBook?.title || 'Book',
+          dueDate: calculatedDue,
+          shelf: selectedBook?.shelf || 'Floor 6 Shelf'
         }),
       });
     } catch (err) {
-      console.error("Failed to notify library admin", err);
-    } finally {
-      setIsSubmittingCheckout(false);
-      setActiveModal(null);
-      alert(`Check-out recorded! You can pick up the volume directly from ${selectedBook.shelf} at 2 Harrison St. Confirmation sent to ${user.email}.`);
+      console.error("Failed to trigger checkout email", err);
     }
   };
 
@@ -587,23 +522,24 @@ if (selectedBook) {
       isCheckedOut: false
     };
 
-    setBooks(prev => [newBook, ...prev]);
+    setBooks((prev) => [newBook, ...prev]);
     setDonationForm({ title: '', author: '', tag: 'Strategic Management', donorName: '', donorCohort: "WG'26" });
     setActiveModal(null);
-    alert(`Thank you! "${newBook.title}" has been registered. Please drop off your book at 2 Harrison St, Fl 6!`);
+    alert(`Thank you! "${newBook.title}" has been registered. Please send or drop off your book at 2 Harrison St, Fl 6!`);
   };
 
-  const filteredBooks = books.filter(book => {
-    const matchesSearch = book.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          book.author.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          book.shelf.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          (book.isbn && book.isbn.includes(searchQuery));
-    
-    const matchesTags = selectedTags.length === 0 || selectedTags.some(tag => book.tags.includes(tag));
+  const filteredBooks = books.filter((book) => {
+    const matchesSearch =
+      book.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      book.author.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      book.shelf.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (book.isbn && book.isbn.includes(searchQuery));
+
+    const matchesTags = selectedTags.length === 0 || selectedTags.some((tag) => book.tags.includes(tag));
     return matchesSearch && matchesTags;
   });
 
-  const adminFilteredBooks = books.filter(book => {
+  const adminFilteredBooks = books.filter((book) => {
     if (adminStockFilter === 'in-stock') return !book.isCheckedOut;
     if (adminStockFilter === 'checked-out') return book.isCheckedOut;
     return true;
@@ -625,16 +561,10 @@ if (selectedBook) {
         </div>
         <div className="flex flex-wrap gap-2 md:gap-3 text-sm font-medium">
           <button 
-            onClick={() => setActiveModal('scan')}
-            className="flex items-center gap-1.5 bg-wharton-navy text-white px-3.5 py-2 text-xs tracking-wider uppercase hover:bg-wharton-red transition-colors font-semibold shadow-sm"
-          >
-            <ScanBarcode className="w-4 h-4" /> Scan RFID / Barcode
-          </button>
-          <button 
             onClick={() => setActiveModal(isAdminLoggedIn ? 'admin-panel' : 'admin-login')}
             className="flex items-center gap-1.5 border border-wharton-navy/20 text-wharton-navy px-3 py-2 text-xs tracking-wider uppercase hover:bg-wharton-navy hover:text-white transition-colors"
           >
-            <Lock className="w-3.5 h-3.5 text-wharton-red" /> {isAdminLoggedIn ? 'Admin Active' : 'Admin Portal'}
+            <Lock className="w-3.5 h-3.5 text-wharton-red" /> {isAdminLoggedIn ? 'Admin Active' : 'Admin'}
           </button>
           <button 
             onClick={() => setActiveModal('donate')}
@@ -643,10 +573,18 @@ if (selectedBook) {
             <Gift className="w-4 h-4 text-wharton-red" /> Donate Book
           </button>
           <button 
-            onClick={() => setActiveModal('verify')}
-            className={`flex items-center gap-1.5 border px-3.5 py-2 text-xs tracking-wider uppercase transition-colors ${user.isVerified ? 'border-emerald-700 text-emerald-800 bg-emerald-50' : 'border-wharton-navy/20 text-wharton-navy hover:bg-wharton-navy hover:text-white'}`}
+            onClick={() => handleSimulateReturnScan()}
+            className="flex items-center gap-1.5 border border-wharton-navy/20 text-wharton-navy px-3.5 py-2 text-xs tracking-wider uppercase hover:bg-wharton-navy hover:text-white transition-colors"
           >
-            <UserCheck className="w-4 h-4 text-wharton-red" /> {user.isVerified ? `✓ ${user.name.split(' ')[0]}` : 'Verify PennCard'}
+            <RotateCcw className="w-4 h-4 text-wharton-red" /> Return Book
+          </button>
+          <button 
+            onClick={() => setActiveModal('verify')}
+            className={`flex items-center gap-1.5 border px-3.5 py-2 text-xs tracking-wider uppercase transition-colors ${
+              user.isVerified ? 'border-emerald-700 text-emerald-800 bg-emerald-50' : 'border-wharton-navy/20 text-wharton-navy hover:bg-wharton-navy hover:text-white'
+            }`}
+          >
+            <Camera className="w-4 h-4 text-wharton-red" /> {user.isVerified ? '✓ PennID Verified' : 'PennID Verify'}
           </button>
         </div>
       </header>
@@ -654,16 +592,16 @@ if (selectedBook) {
       {/* Editorial Hero */}
       <section className="px-6 py-12 md:px-16 max-w-5xl mx-auto text-center">
         <span className="inline-block border border-wharton-navy/20 px-3 py-1 text-xs uppercase tracking-widest text-wharton-navy mb-4">
-          By WEMBA, For WEMBA • RFID / Optical Checkout System
+          By WEMBA, For WEMBA
         </span>
         <h2 className="font-serif text-3xl md:text-5xl leading-tight text-wharton-navy mb-4">
           Where community meets access — extending learning beyond the classroom.
         </h2>
         <p className="text-sm md:text-base text-charcoal/80 max-w-2xl mx-auto mb-8 leading-relaxed">
-          Founded and curated by <strong>Gerald Glover (WG’26)</strong>, Glover Library is a self-sustaining knowledge hub. Scan shelf tags at 2 Harrison St or check out books directly below.
+          Founded and curated by <strong>Gerald Glover (WG’26)</strong>, Glover Library is a self-sustaining knowledge hub designed for Executive MBA participants.
         </p>
 
-        {/* Search Bar */}
+        {/* Smart Search Bar */}
         <div className="relative max-w-2xl mx-auto">
           <input 
             type="text" 
@@ -681,8 +619,8 @@ if (selectedBook) {
         <div className="max-w-3xl mx-auto text-center flex flex-col md:flex-row items-center justify-center gap-4">
           <HeartHandshake className="w-8 h-8 text-wharton-red shrink-0" />
           <div>
-            <h4 className="font-serif text-xl text-white">Borrow freely. Scan on shelf. Return thoughtfully.</h4>
-            <p className="text-xs text-canvas/70 mt-1">Tap 'Scan RFID / Barcode' to borrow physical books directly at the shelf.</p>
+            <h4 className="font-serif text-xl text-white">Borrow freely. Return thoughtfully.</h4>
+            <p className="text-xs text-canvas/70 mt-1">Every timely return ensures your classmates have access when they need it.</p>
           </div>
         </div>
       </section>
@@ -691,9 +629,9 @@ if (selectedBook) {
       <section className="px-6 py-10 md:px-16 max-w-7xl mx-auto">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-baseline mb-8 gap-4">
           <div>
-            <span className="text-xs uppercase tracking-widest text-wharton-navy/60">Collection Catalog</span>
+            <span className="text-xs uppercase tracking-widest text-wharton-navy/60">6th Floor Break Area</span>
             <h3 className="font-serif text-2xl text-wharton-navy mt-1 flex items-center gap-2">
-              Titles ({filteredBooks.length}) <Sparkles className="w-4 h-4 text-wharton-red" />
+              Collection ({filteredBooks.length}) <Sparkles className="w-4 h-4 text-wharton-red" />
             </h3>
           </div>
           
@@ -722,7 +660,9 @@ if (selectedBook) {
           {filteredBooks.map((book) => (
             <div 
               key={book.id} 
-              className={`bg-white p-6 border transition-all flex flex-col justify-between ${book.isCheckedOut ? 'border-dashed border-wharton-navy/30 bg-white/50' : 'border-wharton-navy/10 hover:border-wharton-navy'}`}
+              className={`bg-white p-6 border transition-all flex flex-col justify-between ${
+                book.isCheckedOut ? 'border-dashed border-wharton-navy/30 bg-white/50' : 'border-wharton-navy/10 hover:border-wharton-navy'
+              }`}
             >
               <div>
                 <div className="flex justify-between items-start text-xs text-subtle mb-3">
@@ -764,17 +704,17 @@ if (selectedBook) {
                 </div>
                 {book.isCheckedOut ? (
                   <button 
-                    onClick={() => { setSelectedBook(book); setActiveModal('return-confirm'); }}
-                    className="bg-emerald-700 text-white px-3 py-1.5 text-xs uppercase tracking-wider hover:bg-emerald-800 transition-colors flex items-center gap-1.5 font-semibold"
+                    onClick={() => handleSimulateReturnScan(book)}
+                    className="bg-emerald-700 text-white px-3 py-1.5 text-xs uppercase tracking-wider hover:bg-emerald-800 transition-colors flex items-center gap-1.5"
                   >
                     <RotateCcw className="w-3.5 h-3.5" /> Return
                   </button>
                 ) : (
                   <button 
-                    onClick={() => handleInitiateBorrow(book)}
-                    className="bg-wharton-navy text-white px-3.5 py-1.5 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors flex items-center gap-1.5 font-semibold"
+                    onClick={() => handleSimulateScan(book)}
+                    className="bg-wharton-navy text-white px-3 py-1.5 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors flex items-center gap-1.5"
                   >
-                    <ScanBarcode className="w-3.5 h-3.5" /> Borrow
+                    <Radio className="w-3.5 h-3.5" /> Scan
                   </button>
                 )}
               </div>
@@ -783,220 +723,488 @@ if (selectedBook) {
         </div>
       </section>
 
-      {/* MODAL: RFID / Barcode Scanner Simulator */}
-      {activeModal === 'scan' && (
-        <div className="fixed inset-0 bg-wharton-navy/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-canvas border border-wharton-navy max-w-md w-full p-6 shadow-2xl relative">
-            <button onClick={() => { setActiveModal(null); setScannerStatus('idle'); }} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy"><X className="w-5 h-5" /></button>
-            <div className="flex items-center gap-2 text-wharton-red text-xs uppercase tracking-widest font-semibold mb-1">
-              <ScanBarcode className="w-4 h-4" /> Physical Shelf Optical Sensor
-            </div>
-            <h3 className="font-serif text-2xl text-wharton-navy mb-1">Scan RFID / Barcode</h3>
-            <p className="text-xs text-subtle mb-4">Simulate tapping an RFID chip or reading the barcode of any book on the shelf at 2 Harrison St.</p>
-
-            <div className="border-2 border-dashed border-wharton-navy/30 bg-white p-6 rounded-sm text-center mb-4 relative overflow-hidden">
-              <QrCode className="w-16 h-16 text-wharton-navy/40 mx-auto mb-2 animate-pulse" />
-              <p className="font-serif text-sm text-wharton-navy font-semibold">
-                {scannerStatus === 'scanning' ? 'Reading sensor...' : scannerStatus === 'success' ? 'Tag Matched!' : 'Ready for shelf scan'}
-              </p>
-              <p className="text-[11px] text-subtle mt-0.5">Hold sticker or barcode against scanner</p>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">Or Enter Book ID / ISBN / Title:</label>
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    value={scannedCode} 
-                    onChange={(e) => setScannedCode(e.target.value)} 
-                    placeholder="e.g. 978-0593086193 or Clear Thinking"
-                    className="flex-1 bg-white border border-wharton-navy/20 p-2 text-xs font-mono text-wharton-navy" 
-                  />
-                  <button 
-                    onClick={() => handleSimulateScan()}
-                    className="bg-wharton-navy text-white px-4 py-2 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors font-semibold"
-                  >
-                    Scan
-                  </button>
-                </div>
-              </div>
-
-              {scannerStatus === 'not-found' && (
-                <div className="bg-red-50 border border-red-200 text-wharton-red p-2.5 text-xs flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>No book tag found matching that identifier.</span>
-                </div>
-              )}
-
-              <div className="pt-2 border-t border-wharton-navy/10">
-                <span className="text-[10px] uppercase tracking-wider text-subtle block mb-1.5 font-semibold">Quick Test Shelf Tags:</span>
-                <div className="flex flex-wrap gap-1.5 text-xs">
-                  <button 
-                    onClick={() => handleSimulateScan('Clear Thinking')}
-                    className="bg-white border border-wharton-navy/20 px-2 py-1 text-[11px] hover:border-wharton-navy text-wharton-navy"
-                  >
-                    Clear Thinking
-                  </button>
-                  <button 
-                    onClick={() => handleSimulateScan('Brick by Brick')}
-                    className="bg-white border border-wharton-navy/20 px-2 py-1 text-[11px] hover:border-wharton-navy text-wharton-navy"
-                  >
-                    Brick by Brick
-                  </button>
-                  <button 
-                    onClick={() => handleSimulateScan('978-0679762881')}
-                    className="bg-white border border-wharton-navy/20 px-2 py-1 text-[11px] hover:border-wharton-navy text-wharton-navy font-mono"
-                  >
-                    High Output Mgmt (ISBN)
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 1: PennCard Optical Verification Modal */}
-      {activeModal === 'verify' && (
+      {/* MODAL 1: Admin Passcode Login */}
+      {activeModal === 'admin-login' && (
         <div className="fixed inset-0 bg-wharton-navy/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-canvas border border-wharton-navy max-w-md w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
-            <button 
-              onClick={() => { setActiveModal(null); setOcrError(''); }} 
-              className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy"
-            >
+          <div className="bg-canvas border border-wharton-navy max-w-sm w-full p-6 shadow-2xl relative">
+            <button onClick={() => setActiveModal(null)} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy">
               <X className="w-5 h-5" />
             </button>
-            
             <div className="flex items-center gap-2 text-wharton-red text-xs uppercase tracking-widest font-semibold mb-1">
-              <UserCheck className="w-4 h-4" /> Patron Identity Verification
+              <ShieldCheck className="w-4 h-4" /> Librarian Access
             </div>
-            <h3 className="font-serif text-2xl text-wharton-navy mb-1">Verify PennCard</h3>
-            <p className="text-xs text-subtle mb-4">
-              Capture or upload a photo of your physical PennCard. The system validates the official layout and extracts your PennID.
-            </p>
+            <h3 className="font-serif text-2xl text-wharton-navy mb-2">Admin Portal</h3>
+            <p className="text-xs text-subtle mb-4">Enter passcode to unlock catalog controls and patron audit log.</p>
 
-            {/* Optical Card Scanner Dropzone */}
-            <div className="border-2 border-dashed border-wharton-navy/30 bg-white p-5 text-center mb-4 relative hover:border-wharton-navy transition-colors rounded-sm">
-              <input 
-                type="file" 
-                accept="image/*" 
-                capture="environment"
-                onChange={handlePennCardUpload}
-                disabled={ocrProcessing}
-                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-              />
-              {ocrProcessing ? (
-                <div className="flex flex-col items-center py-2">
-                  <RefreshCw className="w-8 h-8 text-wharton-red animate-spin mb-2" />
-                  <p className="text-xs font-semibold text-wharton-navy">Analyzing PennCard & reading credentials...</p>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center py-1">
-                  <Camera className="w-8 h-8 text-wharton-navy/40 mb-1" />
-                  <span className="text-xs font-semibold text-wharton-navy">Tap to Capture / Upload PennCard</span>
-                  <span className="text-[10px] text-subtle mt-0.5">Validates official blue banner & 8-digit PennID</span>
-                </div>
+            <form onSubmit={handleAdminLoginSubmit} className="space-y-4">
+              <div>
+                <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">Librarian Passcode *</label>
+                <input 
+                  type="password" 
+                  value={adminPasscode} 
+                  onChange={(e) => setAdminPasscode(e.target.value)} 
+                  placeholder="Enter passcode..."
+                  className="w-full bg-white border border-wharton-navy/20 p-2.5 font-serif text-wharton-navy text-center tracking-widest"
+                  required
+                />
+              </div>
+
+              {adminError && (
+                <p className="text-xs text-wharton-red font-medium text-center">Incorrect passcode. Please try again.</p>
               )}
-            </div>
-
-            {/* Rejection Alert */}
-            {ocrError && (
-              <div className="bg-red-50 border border-red-200 text-wharton-red p-2.5 text-xs flex items-start gap-2 mb-3">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{ocrError}</span>
-              </div>
-            )}
-
-            {/* Success Banner */}
-            {detectedPennId && (
-              <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 p-2.5 text-xs mb-3 flex items-start gap-2">
-                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-700 mt-0.5" />
-                <div>
-                  <span className="font-semibold block">PennCard Verified</span>
-                  <span>PennID: {detectedPennId} {user.name ? `• ${user.name}` : ''}</span>
-                </div>
-              </div>
-            )}
-
-            {/* Verification Form */}
-            <form onSubmit={handleVerifySubmit} className="space-y-3">
-              <div>
-                <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">Full Name *</label>
-                <input 
-                  type="text" 
-                  value={user.name} 
-                  onChange={(e) => setUser({...user, name: e.target.value})} 
-                  placeholder="e.g. Gerald Glover"
-                  className="w-full bg-white border border-wharton-navy/20 p-2 text-xs font-serif text-wharton-navy" 
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">Penn Email *</label>
-                <input 
-                  type="email" 
-                  value={user.email} 
-                  onChange={(e) => setUser({...user, email: e.target.value})} 
-                  placeholder="username@wharton.upenn.edu"
-                  className="w-full bg-white border border-wharton-navy/20 p-2 text-xs font-serif text-wharton-navy" 
-                  required
-                />
-                <span className="text-[10px] text-subtle mt-1 block">Must end with <strong>penn.edu</strong></span>
-              </div>
 
               <button 
                 type="submit"
-                disabled={ocrProcessing}
-                className="w-full mt-2 bg-wharton-navy text-white py-2.5 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors font-semibold flex items-center justify-center gap-2"
+                className="w-full bg-wharton-navy text-white py-3 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors flex items-center justify-center gap-2"
               >
-                <CheckCircle2 className="w-4 h-4" /> CONFIRM & SAVE PATRON
+                <Lock className="w-4 h-4" /> Unlock Admin Dashboard
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL 2: Check-out Confirmation Modal */}
-      {activeModal === 'checkout-confirm' && selectedBook && (
-        <div className="fixed inset-0 bg-wharton-navy/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-canvas border border-wharton-navy max-w-md w-full p-6 shadow-2xl relative">
-            <button onClick={() => setActiveModal(null)} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy"><X className="w-5 h-5" /></button>
+      {/* MODAL 2: Admin Dashboard Panel */}
+      {activeModal === 'admin-panel' && (
+        <div className="fixed inset-0 bg-wharton-navy/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <div className="bg-canvas border border-wharton-navy max-w-4xl w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <button onClick={() => setActiveModal(null)} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy">
+              <X className="w-5 h-5" />
+            </button>
             
-            <div className="flex items-center gap-2 text-emerald-700 text-xs uppercase tracking-widest font-semibold mb-1">
-              <CheckCircle2 className="w-4 h-4" /> Verified Penn Patron
+            <div className="flex justify-between items-start mb-6 border-b border-wharton-navy/10 pb-4">
+              <div>
+                <div className="flex items-center gap-2 text-emerald-700 text-xs uppercase tracking-widest font-semibold mb-1">
+                  <ShieldCheck className="w-4 h-4" /> Integrated Admin Mode Active
+                </div>
+                <h3 className="font-serif text-3xl text-wharton-navy">Librarian Dashboard</h3>
+              </div>
+              <button 
+                onClick={handleExportCSV}
+                className="bg-wharton-navy text-white px-3.5 py-2 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors flex items-center gap-1.5"
+              >
+                <Download className="w-3.5 h-3.5" /> Export Catalog CSV
+              </button>
             </div>
-            <h3 className="font-serif text-2xl text-wharton-navy mt-1 mb-4">{selectedBook.title}</h3>
 
-            <div className="bg-white p-4 border border-wharton-navy/10 space-y-2.5 text-xs mb-6">
-              <div className="flex justify-between"><span className="text-subtle">Author:</span> <span className="font-medium">{selectedBook.author}</span></div>
-              <div className="flex justify-between"><span className="text-subtle">Shelf Location:</span> <span className="font-medium text-wharton-red">{selectedBook.shelf}</span></div>
-              <div className="flex justify-between"><span className="text-subtle">Patron Name:</span> <span className="font-medium">{user.name}</span></div>
-              <div className="flex justify-between"><span className="text-subtle">PennKey:</span> <span className="font-medium font-mono text-wharton-navy">{user.pennKey || extractPennKey(user.email)}</span></div>
-              <div className="flex justify-between"><span className="text-subtle">Penn Email:</span> <span className="font-medium">{user.email}</span></div>
-              <div className="flex justify-between pt-2 border-t border-wharton-navy/10 font-semibold text-wharton-navy">
-                <span className="flex items-center gap-1 text-wharton-red"><Calendar className="w-3.5 h-3.5" /> Due Date (14 Days):</span> 
-                <span>{getCalculatedDueDate()}</span>
+            <div className="flex justify-between items-center mb-4 text-xs">
+              <span className="font-serif text-base text-wharton-navy font-semibold">
+                Inventory Status ({adminFilteredBooks.length} titles)
+              </span>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setAdminStockFilter('all')}
+                  className={`px-3 py-1 border ${adminStockFilter === 'all' ? 'bg-wharton-navy text-white' : 'bg-white'}`}
+                >
+                  All ({books.length})
+                </button>
+                <button 
+                  onClick={() => setAdminStockFilter('in-stock')}
+                  className={`px-3 py-1 border ${adminStockFilter === 'in-stock' ? 'bg-emerald-800 text-white' : 'bg-white'}`}
+                >
+                  Available ({books.filter((b) => !b.isCheckedOut).length})
+                </button>
+                <button 
+                  onClick={() => setAdminStockFilter('checked-out')}
+                  className={`px-3 py-1 border ${adminStockFilter === 'checked-out' ? 'bg-wharton-red text-white' : 'bg-white'}`}
+                >
+                  Borrowed ({books.filter((b) => b.isCheckedOut).length})
+                </button>
               </div>
             </div>
 
+            <div className="bg-white border border-wharton-navy/15 overflow-x-auto mb-6">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-wharton-navy text-canvas uppercase tracking-wider font-semibold border-b border-wharton-navy/20">
+                  <tr>
+                    <th className="p-3">Title & Author</th>
+                    <th className="p-3">Shelf</th>
+                    <th className="p-3">Status</th>
+                    <th className="p-3">Borrower & Contact Details</th>
+                    <th className="p-3 text-right">Override Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-wharton-navy/10">
+                  {adminFilteredBooks.map((b) => (
+                    <tr key={b.id} className="hover:bg-canvas/50">
+                      <td className="p-3 font-serif">
+                        <span className="font-semibold text-wharton-navy block">{b.title}</span>
+                        <span className="text-subtle text-[11px]">{b.author}</span>
+                      </td>
+                      <td className="p-3 text-wharton-red font-medium">{b.shelf}</td>
+                      <td className="p-3">
+                        {b.isCheckedOut ? (
+                          <span className="text-wharton-red font-semibold">● Borrowed</span>
+                        ) : (
+                          <span className="text-emerald-700 font-semibold">● Available</span>
+                        )}
+                      </td>
+                      <td className="p-3 font-medium text-charcoal/80">
+                        {b.checkedOutBy ? (
+                          <div>
+                            <span className="font-semibold text-wharton-navy block">{b.checkedOutBy}</span>
+                            <span className="text-subtle text-[10px] block">{b.borrowerEmail || 'No email recorded'}</span>
+                            <span className="text-subtle text-[10px] block">{b.borrowerPhone || 'No phone recorded'}</span>
+                          </div>
+                        ) : '—'}
+                      </td>
+                      <td className="p-3 text-right">
+                        <button 
+                          onClick={() => handleToggleStockStatus(b.id)}
+                          className="border border-wharton-navy/20 px-2.5 py-1 text-[11px] uppercase tracking-wider hover:bg-wharton-navy hover:text-white transition-colors inline-flex items-center gap-1"
+                        >
+                          <RefreshCw className="w-3 h-3" /> Toggle Status
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="border-t border-wharton-navy/10 pt-4">
+              <h4 className="font-serif text-lg text-wharton-navy mb-2">Verified Patron Audit Log</h4>
+              {user.isVerified ? (
+                <div className="bg-white p-4 border border-wharton-navy/15 text-xs flex justify-between items-center">
+                  <div>
+                    <p className="font-serif text-sm font-semibold text-wharton-navy">{user.name} ({user.cohort})</p>
+                    <p className="text-subtle">PennID: {user.pennId} • {user.email} • {user.phone}</p>
+                  </div>
+                  <span className="text-emerald-800 font-semibold bg-emerald-50 border border-emerald-700/20 px-2.5 py-1">
+                    ✓ PennID Photo Verified
+                  </span>
+                </div>
+              ) : (
+                <p className="text-xs text-subtle italic">No patrons currently active in device session.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: Donate a Book Modal */}
+      {activeModal === 'donate' && (
+        <div className="fixed inset-0 bg-wharton-navy/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-canvas border border-wharton-navy max-w-md w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <button onClick={() => setActiveModal(null)} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy">
+              <X className="w-5 h-5" />
+            </button>
+            <div className="flex items-center gap-2 text-wharton-red text-xs uppercase tracking-widest font-semibold mb-1">
+              <Gift className="w-4 h-4" /> Cohort Contribution
+            </div>
+            <h3 className="font-serif text-2xl text-wharton-navy mb-1">Donate a Book</h3>
+            <p className="text-xs text-subtle mb-4">Enrich our collection by contributing a book.</p>
+
+            <div className="bg-white p-3.5 border-l-2 border-wharton-red border-y border-r border-wharton-navy/15 mb-5 text-xs">
+              <span className="text-[10px] uppercase tracking-widest text-wharton-red font-bold block mb-1">Ship or Drop Off Books To:</span>
+              <p className="font-serif text-sm font-semibold text-wharton-navy">Glover Library / Pooja</p>
+              <p className="text-charcoal/90 mt-0.5">2 Harrison St, Fl 6</p>
+              <p className="text-charcoal/90">San Francisco, CA 94105</p>
+            </div>
+
+            <form onSubmit={handleDonateBookSubmit} className="space-y-3 text-sm">
+              <div>
+                <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">Book Title *</label>
+                <input 
+                  type="text" 
+                  value={donationForm.title} 
+                  onChange={(e) => setDonationForm({ ...donationForm, title: e.target.value })} 
+                  placeholder="e.g. Good to Great"
+                  className="w-full bg-white border border-wharton-navy/20 p-2 font-serif text-wharton-navy" 
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">Author Name *</label>
+                <input 
+                  type="text" 
+                  value={donationForm.author} 
+                  onChange={(e) => setDonationForm({ ...donationForm, author: e.target.value })} 
+                  placeholder="e.g. Jim Collins"
+                  className="w-full bg-white border border-wharton-navy/20 p-2 font-serif text-wharton-navy" 
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">Category / Primary Tag *</label>
+                <select 
+                  value={donationForm.tag} 
+                  onChange={(e) => setDonationForm({ ...donationForm, tag: e.target.value })}
+                  className="w-full bg-white border border-wharton-navy/20 p-2 font-serif text-wharton-navy"
+                >
+                  {whartonTags.filter((t) => t !== 'All').map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-wharton-navy/10">
+                <div>
+                  <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">Your Name (Donor Credit) *</label>
+                  <input 
+                    type="text" 
+                    value={donationForm.donorName || user.name} 
+                    onChange={(e) => setDonationForm({ ...donationForm, donorName: e.target.value })} 
+                    placeholder="e.g. Gerald Glover"
+                    className="w-full bg-white border border-wharton-navy/20 p-2 font-serif text-wharton-navy" 
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">Cohort / Program *</label>
+                  <input 
+                    type="text" 
+                    value={donationForm.donorCohort} 
+                    onChange={(e) => setDonationForm({ ...donationForm, donorCohort: e.target.value })} 
+                    placeholder="e.g. WG'26"
+                    className="w-full bg-white border border-wharton-navy/20 p-2 font-serif text-wharton-navy" 
+                  />
+                </div>
+              </div>
+
+              <button 
+                type="submit"
+                className="w-full mt-6 bg-wharton-navy text-white py-3 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors flex items-center justify-center gap-2 font-semibold"
+              >
+                <Gift className="w-4 h-4" /> CONTRIBUTE
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: RFID Checkout Scanning Modal */}
+      {activeModal === 'rfid-scanning' && selectedBook && (
+        <div className="fixed inset-0 bg-wharton-navy/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <div className="bg-white border-2 border-wharton-navy max-w-sm w-full p-8 shadow-2xl text-center">
+            <Radio className="w-12 h-12 text-wharton-red mx-auto mb-4 animate-pulse" />
+            <h3 className="font-serif text-2xl text-wharton-navy mb-2">Scanning RFID Tag...</h3>
+            <p className="text-xs text-subtle">Hold device near the RFID tag on inside cover of <strong>"{selectedBook.title}"</strong>.</p>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: RFID Return Scanning Modal */}
+      {activeModal === 'return-scanning' && selectedBook && (
+        <div className="fixed inset-0 bg-wharton-navy/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <div className="bg-white border-2 border-wharton-navy max-w-sm w-full p-8 shadow-2xl text-center">
+            <RotateCcw className="w-12 h-12 text-emerald-700 mx-auto mb-4 animate-spin" />
+            <h3 className="font-serif text-2xl text-wharton-navy mb-2">Scanning Tag for Return...</h3>
+            <p className="text-xs text-subtle">Reading RFID drop-off tag for <strong>"{selectedBook.title}"</strong>.</p>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 6: PennID Verification Modal */}
+      {activeModal === 'verify' && (
+        <div className="fixed inset-0 bg-wharton-navy/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-canvas border border-wharton-navy max-w-md w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button 
-              onClick={handleConfirmBorrow}
-              disabled={isSubmittingCheckout}
-              className="w-full bg-wharton-navy text-white py-3 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors flex items-center justify-center gap-2 font-semibold disabled:opacity-50"
+              onClick={() => { setActiveModal(null); setOcrError(''); setOcrSuccess(''); }} 
+              className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy"
             >
-              <ScanBarcode className="w-4 h-4" /> {isSubmittingCheckout ? 'Logging Checkout...' : 'CONFIRM SHELF CHECK-OUT'}
+              <X className="w-5 h-5" />
+            </button>
+            
+            <div className="flex items-center gap-2 text-wharton-red text-xs uppercase tracking-widest font-semibold mb-1">
+              <Camera className="w-4 h-4" /> Patron Identity Verification
+            </div>
+            <h3 className="font-serif text-2xl text-wharton-navy mb-1">PennID Verification</h3>
+            <p className="text-xs text-subtle mb-4">
+              Capture or upload a photo of your physical PennID card. Our system verifies card validity and extracts your PennID.
+            </p>
+
+            <form onSubmit={handleSaveVerification}>
+              {/* 1. Mandatory Photo Upload Dropzone */}
+              <div className="mb-4">
+                <label className="block text-xs uppercase text-subtle mb-2 font-semibold">
+                  1. Upload Physical PennID Photo * (Mandatory)
+                </label>
+                <div className="border-2 border-dashed border-wharton-navy/30 bg-white p-4 text-center hover:border-wharton-navy transition-colors relative cursor-pointer rounded-sm">
+                  {isScanningPhoto ? (
+                    <div className="py-6 flex flex-col items-center">
+                      <Sparkles className="w-8 h-8 text-wharton-red mb-2 animate-spin" />
+                      <span className="text-xs text-wharton-navy font-semibold">Enhancing image contrast & running dual-pass OCR...</span>
+                    </div>
+                  ) : uploadPreview || user.pennIdPhoto ? (
+                    <div className="relative">
+                      <img 
+                        src={uploadPreview || user.pennIdPhoto!} 
+                        alt="PennID Preview" 
+                        className="h-32 mx-auto object-cover border border-wharton-navy/20 rounded shadow-sm" 
+                      />
+                      <span className="block text-[10px] text-emerald-700 font-semibold mt-2">
+                        ✓ Photo Attached & Stored for Librarian Audit (Tap to replace)
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="py-4 flex flex-col items-center">
+                      <Upload className="w-8 h-8 text-wharton-navy/40 mb-2" />
+                      <span className="text-xs text-wharton-navy font-medium">Click to upload or capture PennID</span>
+                      <span className="text-[10px] text-subtle mt-1">Accepts physical card camera shots & JPG/PNG files</span>
+                    </div>
+                  )}
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    capture="environment"
+                    onChange={handlePhotoUpload} 
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10" 
+                  />
+                </div>
+              </div>
+
+              {/* Status & Feedback Banners */}
+              {ocrError && (
+                <div className="bg-amber-50 border border-amber-300 text-amber-900 p-2.5 text-xs flex items-start gap-2 mb-3">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-amber-700 mt-0.5" />
+                  <span>{ocrError}</span>
+                </div>
+              )}
+
+              {ocrSuccess && (
+                <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 p-2 text-xs mb-3 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-700" />
+                  <span>{ocrSuccess}</span>
+                </div>
+              )}
+
+              {/* 2. Auto-Extracted & Editable Mandatory Form Fields */}
+              <div className="space-y-3 text-sm border-t border-wharton-navy/10 pt-4">
+                <div className="flex justify-between items-baseline">
+                  <label className="block text-xs uppercase text-subtle font-semibold">
+                    2. Auto-Extracted & Mandatory Fields *
+                  </label>
+                  <span className="text-[10px] text-wharton-red italic">All fields required • Edit if inaccurate</span>
+                </div>
+                
+                <div>
+                  <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">
+                    Full Name (Auto-Extracted / Editable) *
+                  </label>
+                  <input 
+                    type="text" 
+                    value={user.name} 
+                    onChange={(e) => setUser({ ...user, name: e.target.value })} 
+                    placeholder="e.g. Gerald Glover"
+                    className="w-full bg-white border border-wharton-navy/20 p-2 font-serif text-xs text-wharton-navy" 
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">
+                    PennID Number (Auto-Extracted / Editable) *
+                  </label>
+                  <input 
+                    type="text" 
+                    value={user.pennId} 
+                    onChange={(e) => setUser({ ...user, pennId: e.target.value })} 
+                    placeholder="8-digit PennID (e.g. 84920134)"
+                    className="w-full bg-white border border-wharton-navy/20 p-2 font-mono text-xs text-wharton-navy" 
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">
+                      Program / Cohort *
+                    </label>
+                    <input 
+                      type="text" 
+                      value={user.cohort} 
+                      onChange={(e) => setUser({ ...user, cohort: e.target.value })} 
+                      placeholder="e.g. WG'26"
+                      className="w-full bg-white border border-wharton-navy/20 p-2 font-serif text-xs text-wharton-navy" 
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">
+                      Phone Number *
+                    </label>
+                    <input 
+                      type="tel" 
+                      value={user.phone} 
+                      onChange={(e) => setUser({ ...user, phone: e.target.value })} 
+                      placeholder="(415) 000-0000"
+                      className="w-full bg-white border border-wharton-navy/20 p-2 font-serif text-xs text-wharton-navy" 
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">
+                    Penn Email *
+                  </label>
+                  <input 
+                    type="email" 
+                    value={user.email} 
+                    onChange={(e) => setUser({ ...user, email: e.target.value })} 
+                    placeholder="username@wharton.upenn.edu"
+                    className="w-full bg-white border border-wharton-navy/20 p-2 font-serif text-xs text-wharton-navy" 
+                    required
+                  />
+                  <span className="text-[10px] text-subtle mt-1 block">Must end with <strong>penn.edu</strong></span>
+                </div>
+              </div>
+
+              <button 
+                type="submit"
+                disabled={isScanningPhoto}
+                className="w-full mt-5 bg-wharton-navy text-white py-3 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <CheckCircle2 className="w-4 h-4" /> VERIFY
+              </button>
+            </form>
+
+            {/* Footer Support Link */}
+            <div className="mt-4 pt-3 border-t border-wharton-navy/10 text-center">
+              <a 
+                href="mailto:pooja502@upenn.edu?subject=Glover%20Library%20PennID%20Support" 
+                className="text-[11px] text-wharton-red hover:underline flex items-center justify-center gap-1.5"
+              >
+                <AlertCircle className="w-3.5 h-3.5" />
+                Don't have access to PennID or ran into issues? Reach out to support
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 7: Verification Reminder Interstitial */}
+      {activeModal === 'verify-reminder' && (
+        <div className="fixed inset-0 bg-wharton-navy/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-canvas border-2 border-wharton-red max-w-sm w-full p-6 shadow-2xl relative text-center">
+            <button onClick={() => setActiveModal(null)} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy">
+              <X className="w-5 h-5" />
+            </button>
+            <ShieldAlert className="w-12 h-12 text-wharton-red mx-auto mb-3" />
+            <h3 className="font-serif text-2xl text-wharton-navy mb-2">PennID Verification Required</h3>
+            <p className="text-xs text-subtle mb-6 leading-relaxed">
+              Please complete a quick one-time PennID verification before borrowing books from Glover Library.
+            </p>
+            <button 
+              onClick={() => setActiveModal('verify')}
+              className="w-full bg-wharton-navy text-white py-3 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors flex items-center justify-center gap-2 font-semibold"
+            >
+              <Camera className="w-4 h-4" /> Proceed to PennID Verification
             </button>
           </div>
         </div>
       )}
 
-      {/* MODAL 3: Product Detail Page (PDP) */}
+      {/* MODAL 8: Product Detail Page (PDP) */}
       {activeModal === 'pdp' && selectedBook && (
         <div className="fixed inset-0 bg-wharton-navy/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-canvas border border-wharton-navy max-w-lg w-full p-8 shadow-2xl relative">
-            <button onClick={() => setActiveModal(null)} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy"><X className="w-5 h-5" /></button>
+            <button onClick={() => setActiveModal(null)} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy">
+              <X className="w-5 h-5" />
+            </button>
             
             <div className="flex justify-between items-start text-xs text-subtle mb-2">
               <span className="text-wharton-red font-semibold">{selectedBook.shelf}</span>
@@ -1031,17 +1239,17 @@ if (selectedBook) {
               </div>
               {selectedBook.isCheckedOut ? (
                 <button 
-                  onClick={() => setActiveModal('return-confirm')}
-                  className="bg-emerald-700 text-white px-4 py-2 text-xs uppercase tracking-wider hover:bg-emerald-800 transition-colors flex items-center gap-2 font-semibold"
+                  onClick={() => handleSimulateReturnScan(selectedBook)}
+                  className="bg-emerald-700 text-white px-4 py-2 text-xs uppercase tracking-wider hover:bg-emerald-800 transition-colors flex items-center gap-2"
                 >
-                  <RotateCcw className="w-4 h-4" /> Return to Shelf
+                  <RotateCcw className="w-4 h-4" /> Scan to Return
                 </button>
               ) : (
                 <button 
-                  onClick={() => handleInitiateBorrow(selectedBook)}
-                  className="bg-wharton-navy text-white px-4 py-2 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors flex items-center gap-2 font-semibold"
+                  onClick={() => handleSimulateScan(selectedBook)}
+                  className="bg-wharton-navy text-white px-4 py-2 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors flex items-center gap-2"
                 >
-                  <ScanBarcode className="w-4 h-4" /> Borrow Book
+                  <Radio className="w-4 h-4" /> Scan Tag to Borrow
                 </button>
               )}
             </div>
@@ -1049,14 +1257,49 @@ if (selectedBook) {
         </div>
       )}
 
-      {/* MODAL 4: Return Confirmation Modal */}
+      {/* MODAL 9: Checkout Confirmation Modal */}
+      {activeModal === 'checkout' && selectedBook && (
+        <div className="fixed inset-0 bg-wharton-navy/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-canvas border border-wharton-navy max-w-md w-full p-6 shadow-2xl relative">
+            <button onClick={() => setActiveModal(null)} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy">
+              <X className="w-5 h-5" />
+            </button>
+            
+            <div className="flex items-center gap-2 text-emerald-700 text-xs uppercase tracking-widest font-semibold mb-1">
+              <CheckCircle2 className="w-4 h-4" /> Tag Recognized
+            </div>
+            <h3 className="font-serif text-2xl text-wharton-navy mt-1 mb-4">{selectedBook.title}</h3>
+
+            <div className="bg-white p-4 border border-wharton-navy/10 space-y-2.5 text-xs mb-6">
+              <div className="flex justify-between"><span className="text-subtle">Author:</span> <span className="font-medium">{selectedBook.author}</span></div>
+              <div className="flex justify-between"><span className="text-subtle">Shelf Location:</span> <span className="font-medium text-wharton-red">{selectedBook.shelf}</span></div>
+              <div className="flex justify-between"><span className="text-subtle">Patron:</span> <span className="font-medium">{user.name || 'Gerald Glover'} ({user.cohort})</span></div>
+              <div className="flex justify-between pt-2 border-t border-wharton-navy/10 font-semibold text-wharton-navy">
+                <span className="flex items-center gap-1 text-wharton-red"><Calendar className="w-3.5 h-3.5" /> Due Date (14 Days):</span> 
+                <span>{getCalculatedDueDate()}</span>
+              </div>
+            </div>
+
+            <button 
+              onClick={() => handleCheckout(selectedBook.id)}
+              className="w-full bg-wharton-navy text-white py-3 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors flex items-center justify-center gap-2 font-semibold"
+            >
+              <CheckCircle2 className="w-4 h-4" /> BORROW
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 10: Return Confirmation Modal */}
       {activeModal === 'return-confirm' && selectedBook && (
         <div className="fixed inset-0 bg-wharton-navy/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-canvas border border-wharton-navy max-w-md w-full p-6 shadow-2xl relative">
-            <button onClick={() => setActiveModal(null)} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy"><X className="w-5 h-5" /></button>
+            <button onClick={() => setActiveModal(null)} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy">
+              <X className="w-5 h-5" />
+            </button>
             
             <div className="flex items-center gap-2 text-emerald-700 text-xs uppercase tracking-widest font-semibold mb-1">
-              <CheckCircle2 className="w-4 h-4" /> Book Return Confirmation
+              <CheckCircle2 className="w-4 h-4" /> Return Tag Recognized
             </div>
             <h3 className="font-serif text-2xl text-wharton-navy mt-1 mb-4">{selectedBook.title}</h3>
 
@@ -1069,261 +1312,15 @@ if (selectedBook) {
               onClick={() => handleConfirmReturn(selectedBook.id)}
               className="w-full bg-emerald-700 text-white py-3 text-xs uppercase tracking-wider hover:bg-emerald-800 transition-colors flex items-center justify-center gap-2 font-semibold"
             >
-              <CheckCircle2 className="w-4 h-4" /> CONFIRM RETURN TO SHELF
+              <CheckCircle2 className="w-4 h-4" /> RETURNED TO SHELF
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 5: Donate Book Modal */}
-      {activeModal === 'donate' && (
-        <div className="fixed inset-0 bg-wharton-navy/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-canvas border border-wharton-navy max-w-md w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
-            <button onClick={() => setActiveModal(null)} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy"><X className="w-5 h-5" /></button>
-            <div className="flex items-center gap-2 text-wharton-red text-xs uppercase tracking-widest font-semibold mb-1">
-              <Gift className="w-4 h-4" /> Cohort Contribution
-            </div>
-            <h3 className="font-serif text-2xl text-wharton-navy mb-1">Donate a Book</h3>
-            <p className="text-xs text-subtle mb-4">Enrich our collection by contributing a book to the physical library.</p>
-
-            <div className="bg-white p-3.5 border-l-2 border-wharton-red border-y border-r border-wharton-navy/15 mb-5 text-xs">
-              <span className="text-[10px] uppercase tracking-widest text-wharton-red font-bold block mb-1">Drop Off Location:</span>
-              <p className="font-serif text-sm font-semibold text-wharton-navy">Glover Library / Pooja</p>
-              <p className="text-charcoal/90 mt-0.5">2 Harrison St, Fl 6</p>
-              <p className="text-charcoal/90">San Francisco, CA 94105</p>
-            </div>
-
-            <form onSubmit={handleDonateBookSubmit} className="space-y-3 text-sm">
-              <div>
-                <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">Book Title *</label>
-                <input 
-                  type="text" 
-                  value={donationForm.title} 
-                  onChange={(e) => setDonationForm({...donationForm, title: e.target.value})} 
-                  placeholder="e.g. Good to Great"
-                  className="w-full bg-white border border-wharton-navy/20 p-2 font-serif text-wharton-navy" 
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">Author Name *</label>
-                <input 
-                  type="text" 
-                  value={donationForm.author} 
-                  onChange={(e) => setDonationForm({...donationForm, author: e.target.value})} 
-                  placeholder="e.g. Jim Collins"
-                  className="w-full bg-white border border-wharton-navy/20 p-2 font-serif text-wharton-navy" 
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">Category / Primary Tag *</label>
-                <select 
-                  value={donationForm.tag} 
-                  onChange={(e) => setDonationForm({...donationForm, tag: e.target.value})}
-                  className="w-full bg-white border border-wharton-navy/20 p-2 font-serif text-wharton-navy"
-                >
-                  {whartonTags.filter(t => t !== 'All').map(t => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-wharton-navy/10">
-                <div>
-                  <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">Your Name (Donor Credit) *</label>
-                  <input 
-                    type="text" 
-                    value={donationForm.donorName || user.name} 
-                    onChange={(e) => setDonationForm({...donationForm, donorName: e.target.value})} 
-                    placeholder="e.g. Gerald Glover"
-                    className="w-full bg-white border border-wharton-navy/20 p-2 font-serif text-wharton-navy" 
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">Cohort / Program *</label>
-                  <input 
-                    type="text" 
-                    value={donationForm.donorCohort} 
-                    onChange={(e) => setDonationForm({...donationForm, donorCohort: e.target.value})} 
-                    placeholder="e.g. WG'26"
-                    className="w-full bg-white border border-wharton-navy/20 p-2 font-serif text-wharton-navy" 
-                  />
-                </div>
-              </div>
-
-              <button 
-                type="submit"
-                className="w-full mt-6 bg-wharton-navy text-white py-3 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors flex items-center justify-center gap-2 font-semibold"
-              >
-                <Gift className="w-4 h-4" /> CONTRIBUTE
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 6: Admin Login Modal */}
-      {activeModal === 'admin-login' && (
-        <div className="fixed inset-0 bg-wharton-navy/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-canvas border border-wharton-navy max-w-sm w-full p-6 shadow-2xl relative">
-            <button onClick={() => setActiveModal(null)} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy"><X className="w-5 h-5" /></button>
-            <div className="flex items-center gap-2 text-wharton-red text-xs uppercase tracking-widest font-semibold mb-1">
-              <ShieldCheck className="w-4 h-4" /> Librarian Access
-            </div>
-            <h3 className="font-serif text-2xl text-wharton-navy mb-2">Admin Portal</h3>
-            <p className="text-xs text-subtle mb-4">Enter passcode to unlock catalog controls and patron audit log.</p>
-
-            <form onSubmit={handleAdminLoginSubmit} className="space-y-4">
-              <div>
-                <label className="block text-[10px] uppercase text-subtle mb-1 font-semibold">Librarian Passcode *</label>
-                <input 
-                  type="password" 
-                  value={adminPasscode} 
-                  onChange={(e) => setAdminPasscode(e.target.value)} 
-                  placeholder="Enter passcode..."
-                  className="w-full bg-white border border-wharton-navy/20 p-2.5 font-serif text-wharton-navy text-center tracking-widest"
-                  required
-                />
-              </div>
-
-              {adminError && (
-                <p className="text-xs text-wharton-red font-medium text-center">Incorrect passcode. Please try again.</p>
-              )}
-
-              <button 
-                type="submit"
-                className="w-full bg-wharton-navy text-white py-3 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors flex items-center justify-center gap-2 font-semibold"
-              >
-                <Lock className="w-4 h-4" /> Unlock Admin Dashboard
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 7: Admin Panel Modal */}
-      {activeModal === 'admin-panel' && (
-        <div className="fixed inset-0 bg-wharton-navy/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
-          <div className="bg-canvas border border-wharton-navy max-w-4xl w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
-            <button onClick={() => setActiveModal(null)} className="absolute top-4 right-4 text-wharton-navy/50 hover:text-wharton-navy"><X className="w-5 h-5" /></button>
-            
-            <div className="flex justify-between items-start mb-6 border-b border-wharton-navy/10 pb-4">
-              <div>
-                <div className="flex items-center gap-2 text-emerald-700 text-xs uppercase tracking-widest font-semibold mb-1">
-                  <ShieldCheck className="w-4 h-4" /> Integrated Admin Mode Active
-                </div>
-                <h3 className="font-serif text-3xl text-wharton-navy">Librarian Dashboard</h3>
-              </div>
-              <button 
-                onClick={handleExportCSV}
-                className="bg-wharton-navy text-white px-3.5 py-2 text-xs uppercase tracking-wider hover:bg-wharton-red transition-colors flex items-center gap-1.5"
-              >
-                <Download className="w-3.5 h-3.5" /> Export Catalog CSV
-              </button>
-            </div>
-
-            <div className="flex justify-between items-center mb-4 text-xs">
-              <span className="font-serif text-base text-wharton-navy font-semibold">
-                Inventory Status ({adminFilteredBooks.length} titles)
-              </span>
-              <div className="flex gap-2">
-                <button 
-                  onClick={() => setAdminStockFilter('all')}
-                  className={`px-3 py-1 border ${adminStockFilter === 'all' ? 'bg-wharton-navy text-white' : 'bg-white'}`}
-                >
-                  All ({books.length})
-                </button>
-                <button 
-                  onClick={() => setAdminStockFilter('in-stock')}
-                  className={`px-3 py-1 border ${adminStockFilter === 'in-stock' ? 'bg-emerald-800 text-white' : 'bg-white'}`}
-                >
-                  Available ({books.filter(b => !b.isCheckedOut).length})
-                </button>
-                <button 
-                  onClick={() => setAdminStockFilter('checked-out')}
-                  className={`px-3 py-1 border ${adminStockFilter === 'checked-out' ? 'bg-wharton-red text-white' : 'bg-white'}`}
-                >
-                  Borrowed ({books.filter(b => b.isCheckedOut).length})
-                </button>
-              </div>
-            </div>
-
-            <div className="bg-white border border-wharton-navy/15 overflow-x-auto mb-6">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-wharton-navy text-canvas uppercase tracking-wider font-semibold border-b border-wharton-navy/20">
-                  <tr>
-                    <th className="p-3">Title & Author</th>
-                    <th className="p-3">Shelf</th>
-                    <th className="p-3">Status</th>
-                    <th className="p-3">Borrower Details</th>
-                    <th className="p-3 text-right">Override Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-wharton-navy/10">
-                  {adminFilteredBooks.map((b) => (
-                    <tr key={b.id} className="hover:bg-canvas/50">
-                      <td className="p-3 font-serif">
-                        <span className="font-semibold text-wharton-navy block">{b.title}</span>
-                        <span className="text-subtle text-[11px]">{b.author}</span>
-                      </td>
-                      <td className="p-3 text-wharton-red font-medium">{b.shelf}</td>
-                      <td className="p-3">
-                        {b.isCheckedOut ? (
-                          <span className="text-wharton-red font-semibold">● Borrowed</span>
-                        ) : (
-                          <span className="text-emerald-700 font-semibold">● Available</span>
-                        )}
-                      </td>
-                      <td className="p-3 font-medium text-charcoal/80">
-                        {b.checkedOutBy ? (
-                          <div>
-                            <span className="font-semibold text-wharton-navy block">{b.checkedOutBy}</span>
-                            <span className="text-subtle text-[10px] block">{b.borrowerEmail || 'No email recorded'}</span>
-                            <span className="text-subtle text-[10px] block font-mono">Due: {b.dueDate || 'N/A'}</span>
-                          </div>
-                        ) : '—'}
-                      </td>
-                      <td className="p-3 text-right">
-                        <button 
-                          onClick={() => handleToggleStockStatus(b.id)}
-                          className="border border-wharton-navy/20 px-2.5 py-1 text-[11px] uppercase tracking-wider hover:bg-wharton-navy hover:text-white transition-colors inline-flex items-center gap-1"
-                        >
-                          <RefreshCw className="w-3 h-3" /> Toggle Status
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="border-t border-wharton-navy/10 pt-4">
-              <h4 className="font-serif text-lg text-wharton-navy mb-2">Verified Patron Audit Log</h4>
-              {user.isVerified ? (
-                <div className="bg-white p-4 border border-wharton-navy/15 text-xs flex justify-between items-center">
-                  <div>
-                    <p className="font-serif text-sm font-semibold text-wharton-navy">{user.name}</p>
-                    <p className="text-subtle">PennKey: <span className="font-mono">{user.pennKey}</span> • {user.email}</p>
-                  </div>
-                  <span className="text-emerald-800 font-semibold bg-emerald-50 border border-emerald-700/20 px-2.5 py-1">
-                    ✓ Verified Penn Patron
-                  </span>
-                </div>
-              ) : (
-                <p className="text-xs text-subtle italic">No patrons currently active in device session.</p>
-              )}
-            </div>
           </div>
         </div>
       )}
 
       {/* Footer */}
       <footer className="border-t border-wharton-navy/10 py-8 px-6 md:px-16 text-center text-xs text-subtle">
-        <p>Glover Library • Wharton Executive MBA Program • San Francisco</p>
+        <p>Glover Library • WEMBA Executive MBA Program • 2 Harrison St, San Francisco</p>
         <p className="mt-1 font-medium text-wharton-navy">App developed by Pooja S • Curated by Gerald Glover (WG’26)</p>
       </footer>
     </div>
