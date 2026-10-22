@@ -15,8 +15,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Forward the checkout payload directly to Google Apps Script
-    // Google Apps Script requires redirect: 'follow'
+    // Send payload directly to Google Apps Script webhook
     const gasResponse = await fetch(webhookUrl, {
       method: 'POST',
       headers: {
