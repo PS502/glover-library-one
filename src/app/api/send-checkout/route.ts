@@ -1,8 +1,8 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(request) {
+export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK_URL;
@@ -32,10 +32,11 @@ export async function POST(request) {
     }
 
     return NextResponse.json({ success: true, data: result });
-  } catch (error) {
-    console.error("Checkout submission failed:", error.message);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Internal server error";
+    console.error("Checkout submission failed:", errorMessage);
     return NextResponse.json(
-      { error: error.message || "Internal server error" },
+      { error: errorMessage },
       { status: 500 }
     );
   }
