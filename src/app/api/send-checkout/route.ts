@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(request: Request) {
+export async function POST(request) {
   try {
     const body = await request.json();
     const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK_URL;
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Send payload directly to Google Apps Script webhook
+    // Forward the checkout payload directly to Google Apps Script
     const gasResponse = await fetch(webhookUrl, {
       method: 'POST',
       headers: {
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ success: true, data: result });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Checkout submission failed:", error.message);
     return NextResponse.json(
       { error: error.message || "Internal server error" },
